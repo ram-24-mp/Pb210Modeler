@@ -1,3 +1,6 @@
+#For updates and bug fixes, please see the actively maintained version of Pb210Modeler:
+#https://github.com/ram-24-mp/Pb210Modeler
+
 #packages needed
 library(readxl)
 library(writexl)
@@ -8,7 +11,7 @@ library(dplyr)
 library(zoo)
 library(changepoint)
 
-# add in some useful functions for handling plots dynamically
+# some useful functions for handling plots dynamically
 accuracy_finder <- function (column){
   number_to_check=min_by_lowest_precision(column)
   true_accuracy=round_to_first_sig_digit(number_to_check)
