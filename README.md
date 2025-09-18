@@ -12,3 +12,5 @@ Pb210Modeler performs automatic background determination for Alpha data with the
 Pb210Modeler also checks  for model assumption violations due to a SAZ, missing inventory, or age inversions. It also calculates Pb-210 atmospheric flux to aid model validation.
 
 Required libraries include readxl, writexl, ggplot2, scales, segmented, dplyr, zoo, and changepoint.
+
+Example data included here were kindly provided by Josh Himmelstein (https://app.geosamples.org/sample/igsn/10.58052/IEJDH0001).
