@@ -1,5 +1,5 @@
 # Pb210Modeler
-An R script for performing classical Pb-210 age-depth modeling (CF/CRS, CFCS, and CA).
+An R script for performing classical Pb-210 age-depth modeling (CF/CRS, CFCS, and CA/CIC).
 
 This script is an R implementation of the popular spreadsheet-based Pb-210 modeling solutions standardized in Sanchez-Cabeza & Ruiz-Fernández, 2012. Calculations are performed automatically, guided by a TRUE/FALSE user input dialogue.
 
