@@ -1,0 +1,15 @@
+"constant","value"
+"day",5
+"month",8
+"year",2021
+"full numeric year",2021.59428503632
+"core diameter (cm)",10.2
+"core diameter uncertainty (cm)",0.1
+"surface area (cm^2)",81.7128249198705
+"surface area uncertainty (cm^2)",1.60221225333079
+"interval thickness (cm)",1
+"full core length (cm)",48
+"Pb-210 half-life (yr)",22.23
+"Pb-210 half-life uncertainty (yr)",0.12
+"Pb-210 disintegration constant (yr^-1)",0.0311807098767407
+"Pb-210 disinetragtion constant uncertainty (yr^-1)",0.000168316922411556
