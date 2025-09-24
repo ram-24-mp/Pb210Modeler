@@ -4,7 +4,7 @@ An R script for performing classical Pb-210 age-depth modeling (CF/CRS, CFCS, an
 
 This script is an R implementation of the popular spreadsheet-based Pb-210 modeling solutions standardized in Sanchez-Cabeza & Ruiz-Fernández, 2012. Calculations are performed automatically, guided by a TRUE/FALSE user input dialogue.
 
-Pb210Modeler accepts both Alpha and Gamma activity data (dpm/g), and uses dry bulk density (g/cm^3) for mass-related calculations. Activity and mass data should be provided as separate Excel (.xlsx) files. See
+Pb210Modeler accepts both Alpha and Gamma activity data (dpm/g), and uses dry bulk density (g/cm^3) for mass-related calculations. Activity and mass data should be provided as separate Excel (.xlsx) files. See alpha.xlsx, gamma.xlsx, and dbd.xlsx under the activity data and mass data folders for formatting conventions.
 
 Any missing dry bulk density and supported Pb-210 activities are calculated via linear interpolation, while missing total Pb-210 activity is calculated via exponential interpolation. Missing uncertainties are calculated via error propagation. 
 
