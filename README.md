@@ -14,4 +14,4 @@ Pb210Modeler also checks  for model assumption violations due to a SAZ, missing 
 
 Required libraries include readxl, writexl, ggplot2, scales, segmented, dplyr, zoo, and changepoint.
 
-Example data included here were kindly provided by Josh Himmelstein (https://app.geosamples.org/sample/igsn/10.58052/IEJDH0001).
+Example data included here were kindly provided by Josh Himmelstein (ISGN: 10.58052/IEJDH0002).
