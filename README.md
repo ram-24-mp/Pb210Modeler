@@ -10,7 +10,7 @@ Any missing dry bulk density and supported Pb-210 activities are calculated via 
 
 Pb210Modeler performs automatic background determination for Alpha data with the changepoints package, optional user-guided background determination, user-guided surface active zone (SAZ) determination, automatic CFCS model fitting with the segmented package, and optional manual CFCS model fitting. Initial activity C(0) and DBD(0) at the surface are extrapolated by the best-fit linear models (as determined by adjusted R-square) calculated from points 1-3 through 1-10. Data tables (.csv) and accompanying plots (.pdf) are saved to model-specific folders.
 
-Pb210Modeler also checks  for model assumption violations due to a SAZ, missing inventory, or age inversions. It also calculates Pb-210 atmospheric flux to aid model validation.
+Pb210Modeler also checks for model assumption violations due to a SAZ, missing inventory, or age inversions, and calculates Pb-210 atmospheric flux to aid CF model validation. After performing age-depth modeling, Pb210Modeler includes an option for calculating the accumulation rates of other materials within the core, either as a weight fraction (g/g, i.e. carbon, PFAS, etc.) or as a particle concentration (p/g, microplastic, fly ash, etc.).
 
 Required libraries include readxl, writexl, ggplot2, scales, segmented, dplyr, zoo, and changepoint.
 
