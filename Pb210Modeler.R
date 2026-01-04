@@ -2120,6 +2120,175 @@ for (i in 1:nrow(CA_table)){
     }
   }
 }
+
+#optional accumulation rate calculator for other materials in a core
+material_accum_opt=readline(prompt = "CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True) ")
+mat_accum_finished=TRUE
+while (mat_accum_finished==TRUE){
+  
+if (material_accum_opt==TRUE){
+  print("select material data")
+  file_path_new_mat=file.choose()
+  new_mat_dat <- read_excel(file_path_new_mat, col_names = TRUE, col_types = "numeric")
+  new_mat_dat=as.matrix(new_mat_dat)
+  new_mat_dat=new_mat_dat[1:length(na.omit(CF_table[,10]))]
+  new_mat_table=array(NA, dim=c(length(new_mat_dat),10))
+  first_entry=readline(prompt = "Label your material of interest and provide units (g/g) or (p/g)")
+  ## 1. Get first word (XX)
+  xx <- strsplit(first_entry, "\\s+")[[1]][1]
+  ## 2. Determine units (ZZ)
+  if (grepl("\\(g/g\\)", first_entry)) {
+    zz <- "g/(m^2 yr)"
+  } else if (grepl("\\(p/g\\)", first_entry)) {
+    zz <- "p/(m^2 yr)"
+  } else {
+    stop("Unknown units in input string.")
+  }
+  ## 3. Prefixes AAAA
+  aaaa <- c("CF", "CFCS", "CA")
+  ## 4. Build labels
+  acc_labels <- paste(aaaa, xx, "Accumulation Rate", zz)
+  new_column_names_mat_data=c(first_entry,"CF Mass Accumulation g/(m^2 yr)","CF Layer Age (yr CE)",acc_labels[1],"CFCS Mass Accumulation g/(m^2 yr)","CFCS Layer Age (yr CE)",acc_labels[2],"CA Mass Accumulation g/(m^2 yr)","CA Layer Age (yr CE)",acc_labels[3])
+  colnames(new_mat_table)=new_column_names_mat_data
+  new_mat_table[,1]=new_mat_dat
+  new_mat_table[,1] <- na.approx(new_mat_table[,1], na.rm = FALSE)
+  new_mat_table[,2]=na.omit(CF_table[,10])*1000
+  new_mat_table[,3]=na.omit(CF_table[,9])
+  new_mat_table[,4]=new_mat_table[,2]*new_mat_table[,1]
+  if (number_of_changepoints>0){
+  index_fixer=0
+  for (i in 1:(length(extents)-1)){
+    if (extents[i]>1){
+      index_fixer=1
+    }
+    new_mat_table[(extents[i]+index_fixer):extents[i+1],5]=(-decay_const/summary(list_of_models_MAR[[i]])$coefficients[2, 1])*1000
+  }
+  }else{
+    new_mat_table[1:length(new_mat_table[,1]),5]=(-decay_const/summary(changepoint_detection_model_MAR)$coefficients[2, 1])*1000
+  }
+  new_mat_table[,6]=na.omit(CFCS_table[,5])
+  new_mat_table[,7]=new_mat_table[,5]*new_mat_table[,1]
+  new_mat_table[,8]=na.omit(CA_table[,15])*1000
+  new_mat_table[,9]=na.omit(CA_table[,5])
+  new_mat_table[,10]=new_mat_table[,8]*new_mat_table[,1]
+
+
+CA_valid=TRUE
+if(valid_check<0 && material_accum_opt==TRUE){
+  CA_valid=FALSE
+  new_mat_table=new_mat_table[,1:7]
+}
+main_title <- paste(xx, "Accumulation Rate")
+new_mat_accum_plot <- function() {
+  has_CA <- (ncol(new_mat_table) == 10)
+  
+  x1 <- new_mat_table[, 4]; y1 <- new_mat_table[, 3]
+  x2 <- new_mat_table[, 7]; y2 <- new_mat_table[, 6]
+  if (has_CA) {
+    x3 <- new_mat_table[, 10]; y3 <- new_mat_table[, 9]
+  }
+  
+  # collect all years and x values
+  y_all <- c(y1, y2, if (has_CA) y3 else NULL)
+  x_all <- c(x1, x2, if (has_CA) x3 else NULL)
+  
+  ylim_raw <- range(y_all, na.rm = TRUE)  # c(min_year, max_year)
+  xlim     <- range(x_all, na.rm = TRUE)
+  
+  # tick years every 2 years
+  y_min <- floor(ylim_raw[1])
+  y_max <- ceiling(ylim_raw[2])
+  yticks <- seq(y_min, y_max, by = 2)
+  
+  ylab <- "Year (CE)"
+  xlab <- paste(xx, "Accumulation Rate", zz)
+  
+  # plot with Y axis reversed (max at top, min at bottom)
+  plot(
+    x1, y1,
+    type = "b",
+    pch  = 16,
+    col  = "black",
+    xlim = xlim,
+    ylim = ylim_raw,   
+    xlab = xlab,
+    ylab = ylab,
+    main = main_title,
+    yaxt = "n"
+  )
+  
+  # ticks at the *actual year values*
+  axis(
+    side   = 2,
+    at     = yticks,   # same numeric values as in data
+    labels = yticks,
+    las    = 2
+  )
+  
+  # CFCS
+  points(x2, y2, pch = 16, col = "red")
+  lines(x2, y2, col = "red")
+  
+  # CA (if present)
+  if (has_CA) {
+    points(x3, y3, pch = 16, col = "blue")
+    lines(x3, y3, col = "blue")
+  }
+  
+  legend_labels <- c(colnames(new_mat_table)[4], colnames(new_mat_table)[7])
+  legend_cols   <- c("black", "red")
+  
+  if (has_CA) {
+    legend_labels <- c(legend_labels, colnames(new_mat_table)[10])
+    legend_cols   <- c(legend_cols, "blue")
+  }
+  
+  legend(
+    "bottomright",
+    legend = legend_labels,
+    col    = legend_cols,
+    lty    = 1,
+    pch    = 16,
+    bty    = "n"
+  )
+}
+
+# build folder name using the naming convention
+folder_name <- paste(xx, "Accumulation Rate")
+
+# full path in current working directory
+folder_path <- file.path(getwd(), folder_name)
+
+# create folder (won't error if it already exists)
+dir.create(folder_path, showWarnings = FALSE)
+
+# 2. To view on screen
+new_mat_accum_plot()
+
+# 3. To save as PDF in working directory
+xlab <- paste(xx, "Accumulation Rate")
+
+# make a safe filename
+plot_file_name <- paste0(gsub(" ", "_", xlab), ".pdf")
+
+# save the plot
+pdf(file.path(folder_path, plot_file_name))
+new_mat_accum_plot()
+dev.off()
+xlab <- paste(xx, "Accumulation Rate")
+
+# turn that into a safe filename (no spaces)
+file_name <- paste0(gsub(" ", "_", xlab), ".xlsx")
+
+# write new_mat_table to Excel in the working directory
+write_xlsx(
+  list(Sheet1 = as.data.frame(new_mat_table)),
+  path = file.path(folder_path, file_name)
+)
+}
+  mat_accum_finished=readline(prompt = "Accumulation rate calculations complete. Do you wish to calculate accumulation rates for another material (True or False) ")
+}
+
 print("modeling complete!")
 
 save.image(file = "pb210analysis_environment.RData")
