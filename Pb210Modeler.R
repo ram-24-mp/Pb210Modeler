@@ -11,6 +11,8 @@ library(dplyr)
 library(zoo)
 library(changepoint)
 
+rm(list = ls(all.names = TRUE))
+
 # some useful functions for handling plots dynamically
 accuracy_finder <- function (column){
   number_to_check=min_by_lowest_precision(column)
@@ -74,16 +76,18 @@ month=as.numeric(readline(prompt = "Enter Month "))
 year=as.numeric(readline(prompt = "Enter Year "))
 numeric_date=year+(month-1)/12+(day-1)/365.24
 
+interval_constant=readline(prompt = "Is your interval thickness constant (True or False) ")
 # core dimensions, in cm
+if (interval_constant==TRUE){
 dim_defaults=readline(prompt = "Accept Core Dimension Defaults (True or False) ")
 if (dim_defaults==TRUE){
-  internal_diameter=10.2
+  internal_diameter=10.0
   internal_diameter_uncer=0.1
   surface_area=pi*( internal_diameter/2)^2
   surface_area_uncer=pi*internal_diameter*internal_diameter_uncer/2
   interval_thickness=1
 } else {
-  internal_diameter=as.numeric(readline(prompt = "Enter Diameter (default 10.2) "))
+  internal_diameter=as.numeric(readline(prompt = "Enter Diameter (default 10.0) "))
   internal_diameter_uncer=as.numeric(readline(prompt = "Enter Uncertainty (default 0.1) "))
   surface_area=pi*( internal_diameter/2)^2
   surface_area_uncer=pi*internal_diameter*internal_diameter_uncer/2
@@ -114,7 +118,95 @@ for (i in 1:nrow(mass_table)){
     }
   }
 }
-
+}else{ #if interval thickness is variable
+  how_many_thick=as.numeric(readline(prompt = "How many different interval thicknesses are used in the core? "))
+  interval_transitions_list=c()
+  for (i in 1:(how_many_thick-1)){
+      interval_transitions_list[i]=as.numeric(readline(prompt = paste("Enter interval thickness transition depth ", i, ": ")))
+  }
+  interval_thicknesses_list=c()
+  for (i in 1:how_many_thick){
+    interval_thicknesses_list[i]=as.numeric(readline(prompt = paste("Enter interval thickness ", i, ": ")))
+  }
+  dim_defaults=readline(prompt = "Accept Core Dimension Defaults (True or False) ")
+  if (dim_defaults==TRUE){
+    internal_diameter=10.0
+    internal_diameter_uncer=0.1
+    surface_area=pi*( internal_diameter/2)^2
+    surface_area_uncer=pi*internal_diameter*internal_diameter_uncer/2
+    
+  } else {
+    internal_diameter=as.numeric(readline(prompt = "Enter Diameter (default 10.0) "))
+    internal_diameter_uncer=as.numeric(readline(prompt = "Enter Uncertainty (default 0.1) "))
+    surface_area=pi*( internal_diameter/2)^2
+    surface_area_uncer=pi*internal_diameter*internal_diameter_uncer/2
+    
+  }
+  interval_thickness=interval_thicknesses_list[1]
+  core_length=as.numeric(readline(prompt = "Enter Core Length "))
+  
+  # Pb-210 constants: Source DDEP, 2010
+  half_life= 22.23
+  half_life_uncer=0.12
+  decay_const=log(2)/half_life
+  decay_const_uncer= decay_const*(0.12/22.23*100)/100
+  
+  
+  
+  
+  interval_thicknesses <- unlist(interval_thicknesses_list)
+  interval_transitions <- unlist(interval_transitions_list)
+  
+  # Segment boundaries: from 0, through transitions, to core_length
+  bounds <- c(0, interval_transitions, core_length)
+  
+  # Length of each depth segment
+  segment_lengths <- diff(bounds)
+  
+  # Number of intervals in each segment (rounded up)
+  intervals_per_segment <- ceiling(segment_lengths / interval_thicknesses)
+  
+  # Base number of intervals
+  n_intervals <- sum(intervals_per_segment)
+  
+  # Total rows: one for mid-depth, one for boundaries, aligned in depth order
+  mass_table_rows <- 2 * n_intervals+1
+  
+  mass_table=array(data=NA, dim=c(mass_table_rows, 11), dimnames=list(NULL, c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Interval Thickness delta zi (cm)","Dry Bulk Density DBD gcm^-3","Dry Bulk Density Uncertainty u(DBD) gcm^-3","Aerial Dry Mass delta mi/S gcm^-2","Aerial Dry Mass Uncertainty u(delta mi/S) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2")))
+  # 1) Build boundary depths
+  boundary_depths <- numeric(0)
+  
+  for (i in seq_along(interval_thicknesses)) {
+    t     <- interval_thicknesses[i]
+    start <- bounds[i]
+    end   <- bounds[i + 1]
+    
+    seg_bounds <- seq(from = start, to = end - 1e-9, by = t)
+    if (tail(seg_bounds, 1) < end) {
+      seg_bounds <- c(seg_bounds, end)
+    }
+    
+    if (length(boundary_depths) > 0) {
+      seg_bounds <- seg_bounds[-1]
+    }
+    
+    boundary_depths <- c(boundary_depths, seg_bounds)
+  }
+  
+  stopifnot(length(boundary_depths) == n_intervals + 1)
+  
+  # 2) Populate ONLY the first column of the existing mass_table
+  #    (assumes mass_table already has mass_table_rows rows)
+  boundary_rows <- seq(1, by = 2, length.out = length(boundary_depths))
+  mass_table[boundary_rows, 1] <- boundary_depths
+  
+  # rest of z data
+  for (i in seq(2, nrow(mass_table), by = 2)) {  
+    mass_table[i,2]=(mass_table[(i-1),1]+mass_table[(i+1),1])/2
+    mass_table[i,3]=mass_table[(i+1),1]-mass_table[(i-1),1]
+  }
+}
+  
 #load in mass information
 # Define the path to your Excel file
 print("select mass data")
@@ -199,7 +291,7 @@ mass_table[1:(nrow(mass_table)-1),5]=mass_data[,2]
 
 # aerial mass calculations
 mass_table[,6]=mass_table[,3]*mass_table[,4]
-mass_table[,7]=mass_table[,5]*interval_thickness
+mass_table[,7]=mass_table[,5]*mass_table[,3] #did it break?
 # cumulative mass depth
 for (i in 1:nrow(mass_table)){
   if (i==1){
@@ -233,7 +325,7 @@ for (i in 1:nrow(mass_table)-1){
   }
 }
 # create the concentrations table and begin preliminary population
-concentrations_table=array(data=NA, dim=c(((core_length*2)/interval_thickness), 14), dimnames=list(NULL, c("Mid Depth zi (cm)","Total Pb-210 dmp/g","Total Pb-210 Uncertainty u(Pb-210) dmp/g","Supported Pb-210 dmp/g","Supported Pb-210 Uncertainty u(sPb-210) dmp/g","Excess Pb-210 Ci dmp/g","Excess Pb-210 Uncertainty u(Ci) dmp/g","Excess Pb-210 C(i) dmp/g","Excess Pb-210 Uncertainty u(C(i)) dmp/g","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Mass Depth mi (g/cm^2)","ln(Ci)","u(ln(Ci))")))
+concentrations_table=array(data=NA, dim=c((nrow(mass_table)-1), 14), dimnames=list(NULL, c("Mid Depth zi (cm)","Total Pb-210 dmp/g","Total Pb-210 Uncertainty u(Pb-210) dmp/g","Supported Pb-210 dmp/g","Supported Pb-210 Uncertainty u(sPb-210) dmp/g","Excess Pb-210 Ci dmp/g","Excess Pb-210 Uncertainty u(Ci) dmp/g","Excess Pb-210 C(i) dmp/g","Excess Pb-210 Uncertainty u(C(i)) dmp/g","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Mass Depth mi (g/cm^2)","ln(Ci)","u(ln(Ci))"))) #did it break?
 concentrations_table[,1]=mass_table[1:nrow(concentrations_table),2]
 concentrations_table[,12]=mass_table[1:nrow(concentrations_table),10]
 # load in Pb-210 data, assign Alpha or Gamma methods, and fill activity data
@@ -872,24 +964,70 @@ tlogpb210_md_plot=ggplot(tlogpb210_md_plotting_table, aes(x = x, y = y)) +
 print(tlogpb210_md_plot)
 dev.off()
 #make constants table to save
-constants_table=array(data =NA, dim=c(14, 2), dimnames=list(NULL,c("constant","value")))
-constants_table[,1]=c("day","month","year","full numeric year","core diameter (cm)","core diameter uncertainty (cm)","surface area (cm^2)","surface area uncertainty (cm^2)","interval thickness (cm)","full core length (cm)","Pb-210 half-life (yr)","Pb-210 half-life uncertainty (yr)","Pb-210 disintegration constant (yr^-1)","Pb-210 disinetragtion constant uncertainty (yr^-1)")
-constants_table[1,2]=day
-constants_table[2,2]=month
-constants_table[3,2]=year
-constants_table[4,2]=numeric_date
-constants_table[5,2]=internal_diameter
-constants_table[6,2]=internal_diameter_uncer
-constants_table[7,2]=surface_area
-constants_table[8,2]=surface_area_uncer
-constants_table[9,2]=interval_thickness
-constants_table[10,2]=core_length
-constants_table[11,2]=half_life
-constants_table[12,2]=half_life_uncer
-constants_table[13,2]=decay_const
-constants_table[14,2]=decay_const_uncer
-constants_table=as.data.frame(constants_table)
-constants_table$value=as.numeric(constants_table$value)
+constants_table <- data.frame(
+  constant = c(
+    "day",
+    "month",
+    "year",
+    "full numeric year",
+    "core diameter (cm)",
+    "core diameter uncertainty (cm)",
+    "surface area (cm^2)",
+    "surface area uncertainty (cm^2)",
+    "interval thickness (cm)",
+    "full core length (cm)",
+    "Pb-210 half-life (yr)",
+    "Pb-210 half-life uncertainty (yr)",
+    "Pb-210 disintegration constant (yr^-1)",
+    "Pb-210 disinetragtion constant uncertainty (yr^-1)"
+  ),
+  value = I(vector("list", 14)),   # list-column
+  stringsAsFactors = FALSE
+)
+
+# 2) Fill in scalar entries as 1-length numerics
+constants_table$value[[1]]  <- day
+constants_table$value[[2]]  <- month
+constants_table$value[[3]]  <- year
+constants_table$value[[4]]  <- numeric_date
+constants_table$value[[5]]  <- internal_diameter
+constants_table$value[[6]]  <- internal_diameter_uncer
+constants_table$value[[7]]  <- surface_area
+constants_table$value[[8]]  <- surface_area_uncer
+
+# 3) This row can now hold a numeric vector (float list)
+if (exists("interval_thicknesses_list")) {
+  constants_table$value[[9]]  <- interval_thicknesses_list   # vector allowed here
+} else {
+  constants_table$value[[9]]  <- interval_thickness
+}
+
+constants_table$value[[10]] <- core_length
+constants_table$value[[11]] <- half_life
+constants_table$value[[12]] <- half_life_uncer
+constants_table$value[[13]] <- decay_const
+constants_table$value[[14]] <- decay_const_uncer
+
+# 4) Make a CSV-friendly copy (so write.csv still works cleanly)
+constants_table_csv <- constants_table
+
+constants_table_csv$value <- vapply(
+  constants_table$value,
+  function(x) {
+    # x might be a numeric, or a list element containing a numeric/vector
+    if (is.list(x)) {
+      x <- unlist(x, recursive = FALSE, use.names = FALSE)
+    }
+    # Now x is atomic: length 1 (scalar) or >1 (vector)
+    if (length(x) <= 1) {
+      as.character(x)
+    } else {
+      paste(x, collapse = ";")  # works for either case
+    }
+  },
+  character(1)
+)
+
 constants_file_path <- file.path(folder_name, "constants_table.csv")
 write.csv(constants_table, constants_file_path, row.names=FALSE)
 #start of CFCS section
@@ -1167,12 +1305,12 @@ if (number_of_models>1){
 if (number_of_models>=2){
 for (i in 1:number_of_models){
   for (j in extents[[i]]:extents[[i+1]]){
-    CFCS_table[j,6]=CFCS_table[j,4]*((-summary(list_of_models[[i]])$coefficients[2, 2])/(summary(list_of_models[[i]])$coefficients[2,1]))
+    CFCS_table[j,6]=CFCS_table[j,4]*((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])*sqrt(((-summary(list_of_models[[i]])$coefficients[2, 2])/(summary(list_of_models[[i]])$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1]))
   }
 }
 }else{ 
   for (i in 1:nrow(CFCS_table)){
-    CFCS_table[i,6]=CFCS_table[i,4]*((-summary(changepoint_detection_model)$coefficients[2, 2])/(summary(changepoint_detection_model)$coefficients[2,1]))
+    CFCS_table[i,6]=CFCS_table[i,4]*((-decay_const/summary(changepoint_detection_model)$coefficients[2, 1])*sqrt(((-summary(changepoint_detection_model)$coefficients[2, 2])/(summary(changepoint_detection_model)$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(changepoint_detection_model)$coefficients[2, 1]))
   }
 }
 
@@ -2122,7 +2260,7 @@ for (i in 1:nrow(CA_table)){
 }
 
 #optional accumulation rate calculator for other materials in a core
-material_accum_opt=readline(prompt = "CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True) ")
+material_accum_opt=readline(prompt = "CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True or False) ")
 mat_accum_finished=TRUE
 while (mat_accum_finished==TRUE){
   
@@ -2292,3 +2430,4 @@ write_xlsx(
 print("modeling complete!")
 
 save.image(file = "pb210analysis_environment.RData")
+rm(list = ls(all.names = TRUE))
