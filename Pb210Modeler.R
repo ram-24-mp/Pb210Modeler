@@ -1140,6 +1140,9 @@ while (CFCS_modeling_complete==FALSE){
       print(summary(list_of_models[[i]])$adj.r.square)
       print(paste("Model SAR rate (cm/yr)",i))
       print(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])
+      if ((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])<0){
+        print("model assumptions violated! Negative SAR generated, choose different SAR model fit")
+      }
       SAR_model_plot + geom_line(aes(y = fitted(list_of_models[[i]])), color = i, linewidth = 1)
     }
     lines_df <- data.frame()  # To hold all segments
@@ -1165,6 +1168,9 @@ while (CFCS_modeling_complete==FALSE){
     print(SAR_model_plot + geom_line(aes(y = fitted(changepoint_detection_model)), color = "red", linewidth = 1))
     print("single model SAR rate (cm/yr)")
     print(-decay_const/summary(changepoint_detection_model)$coefficients[2, 1])
+    if ((-decay_const/summary(changepoint_detection_model)$coefficients[2, 1])<0){
+      print("model assumptions violated! Negative SAR generated, choose different SAR model fit")
+    }
   }
   CFCS_manual_eval=readline(prompt = "Do you wish to manually set CFCS models? (True or False) ")
   if (CFCS_manual_eval==TRUE){
