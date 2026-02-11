@@ -1594,8 +1594,10 @@ if (surface_active_zone_check==TRUE){
   CFCS_table[,5]=NA
   }
 
-finish_CFCS=readline(prompt = "CFCS modeling complete. Continue to CF? (True) ")
+finish_CFCS=readline(prompt = "CFCS modeling complete. Continue to CF? (True or False) ")
+
 #start of CF section
+if (finish_CFCS==TRUE){
 #create CF table and begin populating it
 CF_table=array(data=NA, dim=c(nrow(mass_table),17), dimnames=list(NULL,c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
 CF_table[,1:2]=mass_table[,1:2]
@@ -1971,7 +1973,7 @@ flux_table[1,1]=atm_flux
 flux_table[1,2]=atm_flux_uncer
 flux_table_path <- file.path(folder_name3, "atm_pb210_flux.csv")
 write.csv(flux_table, flux_table_path, row.names = FALSE, na = "")
-while (finish_CF==FALSE){
+
   print("missing inventory %")
   print(as.numeric((missing_inventory/CF_table[1,5])*100))
   print("surface active zone depth %")
@@ -1989,8 +1991,9 @@ while (finish_CF==FALSE){
       print("surface active zone is greater than 20% of the core! CF model assumptions violated, interpret with caution")
   }
   }
-  finish_CF=readline(prompt = "CF modeling complete. Continue to CA? (True) ")
-}
+  finish_CF=readline(prompt = "CF modeling complete. Continue to CA? (True or False) ")
+
+
 # save the core boundary issues (SAZ and missing inventory)
 core_boundary_info=array(data=NA, dim=c(1,4), dimnames=list(NULL, c("SAZ depth (cm)", "SAZ core %", "missing inventory (dpm/cm^2)", "missing inventory %")))
 if (SAZ_depth!=0){
@@ -2004,7 +2007,12 @@ core_boundary_info[1,3]=missing_inventory
 core_boundary_info[1,4]=(missing_inventory/CF_table[1,5])*100
 boundary_table_path <- file.path(folder_name3, "core_boundary_info.csv")
 write.csv(core_boundary_info, boundary_table_path, row.names = FALSE, na = "")
+}else{
+  finish_CF=readline(prompt = "CF modeling skipped. Do you want to continue to CA? (True or False) ")
+}
+
 #start of CA section
+if (finish_CF==TRUE){
 #initialize array
 CA_table=array(data=NA, dim=c((nrow(concentrations_table)+1),17), dimnames=list(NULL,c("Mid Depth zi cm", "ln(Ci)","Age ti yr","Age Uncertainty u(ti) yr","CIC Age (CE)","ur(l)","ur(C0)","ur(Ci)","t(i) yr","u(t(i)) yr","delta t yr","Uncertainty delta t yr"," Sediment Accumulation Rate s cm/yr","Sediment Accumulation Rate Uncertainty u(s) cm/yr","Mass Accumualtion Rate r g/(cm^2 yr)","Mass Accumualtion Rate Uncertainty u(r) g/(cm^2 yr)","Mass Depth Section mi gcm^-2")))
 # load copied data
@@ -2227,7 +2235,7 @@ CA_age_table_plot = ggplot(CA_age_table, aes(x = x, y = y)) +
   labs(title = "Age vs Mid Depth", x = "Year (CE)", y = "Mid Depth (cm)") +  # Add labels
   scale_x_reverse(breaks = seq(min(CA_age_table$x), max(CA_age_table$x), by = 10), 
                   labels = number_format(accuracy = 1)) +  # Set x-axis increments of 10 without decimals
-  scale_y_reverse(breaks = seq(min(CA_age_table$y), max(CF_age_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
+  scale_y_reverse(breaks = seq(min(CA_age_table$y), max(CA_age_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
   theme_minimal()  # Use a minimal theme
 
 print(CA_age_table_plot)
@@ -2264,7 +2272,7 @@ for (i in 1:nrow(CA_table)){
     }
   }
 }
-
+}
 #optional accumulation rate calculator for other materials in a core
 material_accum_opt=readline(prompt = "CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True or False) ")
 mat_accum_finished=TRUE
@@ -2299,6 +2307,9 @@ if (material_accum_opt==TRUE){
   new_mat_table[,2]=na.omit(CF_table[,10])*1000
   new_mat_table[,3]=na.omit(CF_table[,9])
   new_mat_table[,4]=new_mat_table[,2]*new_mat_table[,1]
+  
+  if (surface_active_zone_check==TRUE){
+  }else{
   if (number_of_changepoints>0){
   index_fixer=0
   for (i in 1:(length(extents)-1)){
@@ -2311,6 +2322,7 @@ if (material_accum_opt==TRUE){
     new_mat_table[1:length(new_mat_table[,1]),5]=(-decay_const/summary(changepoint_detection_model_MAR)$coefficients[2, 1])*1000
   }
   new_mat_table[,6]=na.omit(CFCS_table[,5])
+}
   new_mat_table[,7]=new_mat_table[,5]*new_mat_table[,1]
   new_mat_table[,8]=na.omit(CA_table[,15])*1000
   new_mat_table[,9]=na.omit(CA_table[,5])
@@ -2324,7 +2336,8 @@ if(valid_check<0 && material_accum_opt==TRUE){
 }
 main_title <- paste(xx, "Accumulation Rate")
 new_mat_accum_plot <- function() {
-  has_CA <- (ncol(new_mat_table) == 10)
+  has_CFCS <- any(!is.na(new_mat_table[, 6]))  # CFCS series present?
+  has_CA   <- (ncol(new_mat_table) == 10) && any(!is.na(new_mat_table[, 9]))
   
   x1 <- new_mat_table[, 4]; y1 <- new_mat_table[, 3]
   x2 <- new_mat_table[, 7]; y2 <- new_mat_table[, 6]
@@ -2332,56 +2345,48 @@ new_mat_accum_plot <- function() {
     x3 <- new_mat_table[, 10]; y3 <- new_mat_table[, 9]
   }
   
-  # collect all years and x values
-  y_all <- c(y1, y2, if (has_CA) y3 else NULL)
-  x_all <- c(x1, x2, if (has_CA) x3 else NULL)
+  y_all <- c(y1,
+             if (has_CFCS) y2 else NULL,
+             if (has_CA)   y3 else NULL)
+  x_all <- c(x1,
+             if (has_CFCS) x2 else NULL,
+             if (has_CA)   x3 else NULL)
   
-  ylim_raw <- range(y_all, na.rm = TRUE)  # c(min_year, max_year)
+  ylim_raw <- range(y_all, na.rm = TRUE)
   xlim     <- range(x_all, na.rm = TRUE)
   
-  # tick years every 2 years
-  y_min <- floor(ylim_raw[1])
-  y_max <- ceiling(ylim_raw[2])
+  y_min <- floor(ylim_raw[1]); y_max <- ceiling(ylim_raw[2])
   yticks <- seq(y_min, y_max, by = 2)
   
   ylab <- "Year (CE)"
   xlab <- paste(xx, "Accumulation Rate", zz)
   
-  # plot with Y axis reversed (max at top, min at bottom)
   plot(
     x1, y1,
-    type = "b",
-    pch  = 16,
-    col  = "black",
-    xlim = xlim,
-    ylim = ylim_raw,   
-    xlab = xlab,
-    ylab = ylab,
-    main = main_title,
-    yaxt = "n"
+    type = "b", pch = 16, col = "black",
+    xlim = xlim, ylim = ylim_raw,
+    xlab = xlab, ylab = ylab,
+    main = main_title, yaxt = "n"
   )
+  axis(side = 2, at = yticks, labels = yticks, las = 2)
   
-  # ticks at the *actual year values*
-  axis(
-    side   = 2,
-    at     = yticks,   # same numeric values as in data
-    labels = yticks,
-    las    = 2
-  )
+  if (has_CFCS) {
+    points(x2, y2, pch = 16, col = "red")
+    lines(x2, y2, col = "red")
+  }
   
-  # CFCS
-  points(x2, y2, pch = 16, col = "red")
-  lines(x2, y2, col = "red")
-  
-  # CA (if present)
   if (has_CA) {
     points(x3, y3, pch = 16, col = "blue")
     lines(x3, y3, col = "blue")
   }
   
-  legend_labels <- c(colnames(new_mat_table)[4], colnames(new_mat_table)[7])
-  legend_cols   <- c("black", "red")
+  legend_labels <- c(colnames(new_mat_table)[4])
+  legend_cols   <- c("black")
   
+  if (has_CFCS) {
+    legend_labels <- c(legend_labels, colnames(new_mat_table)[7])
+    legend_cols   <- c(legend_cols, "red")
+  }
   if (has_CA) {
     legend_labels <- c(legend_labels, colnames(new_mat_table)[10])
     legend_cols   <- c(legend_cols, "blue")
