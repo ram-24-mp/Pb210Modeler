@@ -2,14 +2,16 @@
 #https://github.com/ram-24-mp/Pb210Modeler
 
 #packages needed
-library(readxl)
-library(writexl)
-library(ggplot2)
-library(scales)
-library(segmented)
-library(dplyr)
-library(zoo)
-library(changepoint)
+suppressPackageStartupMessages(library(readxl))
+suppressPackageStartupMessages(library(writexl))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(scales))
+suppressPackageStartupMessages(library(segmented))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(zoo))
+suppressPackageStartupMessages(library(changepoint))
+suppressPackageStartupMessages(library(metafor))
+suppressPackageStartupMessages(library(rstudioapi))
 
 rm(list = ls(all.names = TRUE))
 
@@ -448,10 +450,33 @@ if (alpha_or_gamma==TRUE){
   if (length(change_points_bkgrnd) > 0) {
     suggested_background_index <- rownames(pb210_data_auto_bkrng)[change_points_bkgrnd[length(change_points_bkgrnd)]]
     cat("Suggested background activity begins at index:", suggested_background_index, "\n")
+    # REML start
+    y_REML   <- na.omit(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])
+    sei_REML <- na.omit(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 2])
+    
+    ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
+    y_REML   <- y_REML[ok_REML]
+    sei_REML <- sei_REML[ok_REML]
+    n_REML   <- length(y_REML)
+    
+    fit_REML <- rma.uni(yi = y_REML, sei = sei_REML, method = "REML", test = "knha")
+    
+    mu_hat <- as.numeric(fit_REML$b)
+    se_mu  <- as.numeric(fit_REML$se)
+    tau2   <- as.numeric(fit_REML$tau2)
+    tau    <- sqrt(tau2)
+    #REML end
+    print("REML Results (Weighted Mean and Standard Error)")
+    print("Background activity (dmp/g)")
+    print(mu_hat)
+    print("Background activity uncertainty (dmp/g)")
+    print(se_mu)
+    print("Arthmetic Mean & Standard Error Reference Values")
     print("Pb-210 Background Activity (dmp/g)")
     print(mean(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1]))
     print("Pb-210 Background Activity Uncertainty (dmp/g)")
-    print(sd(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 2]))
+    length_finder_1=length(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])
+    print(sd(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])/sqrt(length_finder_1))
   } else {
     cat("No change points detected.\n")
   }
@@ -493,34 +518,79 @@ if (alpha_or_gamma==TRUE){
     background_value=mean(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
     check_for_negs=which((concentrations_table[1:(first_background-1),2]-background_value)<0)[1]
     check_background_length=length(concentrations_table[first_background:nrow(concentrations_table)])
+    test_length_finder=length(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
+    # REML option insert
+    y_REML   <- na.omit(concentrations_table[first_background:nrow(concentrations_table),2])
+    sei_REML <- na.omit(concentrations_table[first_background:nrow(concentrations_table),3])
+    
+    ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
+    y_REML   <- y_REML[ok_REML]
+    sei_REML <- sei_REML[ok_REML]
+    n_REML   <- length(y_REML)
+    
+    fit_REML <- rma.uni(yi = y_REML, sei = sei_REML, method = "REML", test = "knha")
+    
+    mu_hat <- as.numeric(fit_REML$b)
+    se_mu  <- as.numeric(fit_REML$se)
+    tau2   <- as.numeric(fit_REML$tau2)
+    tau    <- sqrt(tau2)
+    # REML done
     if (is.na(check_for_negs)==FALSE){
       accept_new_background=FALSE
       while(accept_new_background==FALSE){
         cat(sprintf("poor background selection detected! negative excess Pb-210 activity at index: %f\n",check_for_negs))
         accept_new_background=readline(prompt = "Accept new background determination from this index? (True) ")
+        #insert REML again
+        y_REML   <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2])
+        sei_REML <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),3])
+        
+        ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
+        y_REML   <- y_REML[ok_REML]
+        sei_REML <- sei_REML[ok_REML]
+        n_REML   <- length(y_REML)
+        
+        fit_REML <- rma.uni(yi = y_REML, sei = sei_REML, method = "REML", test = "knha")
+        
+        mu_hat <- as.numeric(fit_REML$b)
+        se_mu  <- as.numeric(fit_REML$se)
+        tau2   <- as.numeric(fit_REML$tau2)
+        tau    <- sqrt(tau2)
+        #done
         background_value=mean(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))
-        background_value_uncer=sd(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))
+        background_value_uncer=sd(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))/sqrt(test_length_finder)
         first_background=check_for_negs
       }
     }else{
       background_value=mean(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
-      background_value_uncer=sd(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
+      background_value_uncer=sd(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))/sqrt(test_length_finder)
     }
     if (check_background_length<5){
       print("Background selection does not contain enough points! Make a new selection")
       accept_background_determination=FALSE
     }else{
+    print("REML Results (Weighted Mean and Standard Error)")
+    print("Background activity (dmp/g)")
+    print(mu_hat)
+    print("Background activity uncertainty (dmp/g)")
+    print(se_mu)
+    print("Arthmetic Mean & Standard Error Reference Values")
     print("Background activity (dmp/g)")
     print(background_value)
     print("Background activity uncertainty (dmp/g)")
     print(background_value_uncer)
+    accept_REML=readline(prompt = "Accept REML results? (True or False) ")
     accept_background_determination=readline(prompt = "Accept background determination? (True or False) ")
     }
   }
   for (i in 1:nrow(concentrations_table)){
     if (i %% 2 == 0) {
+      if (accept_REML==TRUE){
+        concentrations_table[i,4]=mu_hat
+        concentrations_table[i,5]=se_mu
+      }else{
       concentrations_table[i,4]=background_value
       concentrations_table[i,5]=background_value_uncer
+      }
     }
   }
   concentrations_table=concentrations_table[1:first_background-1,]
@@ -735,7 +805,7 @@ for (i in 1:nrow(concentrations_table)-1){
 #save off copies of background-corrected mass and concentration data, accompanying plots
 # find your destination folder
 print("select destination folder")
-destination_folder <- choose.dir(default = "", caption = "Select Destination Folder")
+destination_folder <- rstudioapi::selectDirectory("Select Destination Folder")
 
 # Check if a folder was selected
 if (!is.null(destination_folder) && destination_folder != "") {
