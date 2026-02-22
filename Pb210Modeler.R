@@ -878,6 +878,74 @@ for (model_index in seq_along(C0CA_model_list)) {
 }
 write_xlsx(model_summaries, path = "Background_corrected_mass_concentration_data/C0CA_model_summaries.xlsx")
 
+#REML save
+if (exists("fit_REML", inherits = TRUE) && inherits(get("fit_REML", inherits = TRUE), "rma.uni")) {
+  s <- summary(fit_REML)
+  
+  params <- data.frame(
+    parameter = c("mu_hat", "se_mu", "ci_lb", "ci_ub", "tau2", "tau", "I2", "H2",
+                  "QE", "QE_df", "QE_pval", "k", "method", "test"),
+    value = c(mu_hat,
+              se_mu,
+              as.numeric(s$ci.lb),
+              as.numeric(s$ci.ub),
+              tau2,
+              tau,
+              as.numeric(s$I2),
+              as.numeric(s$H2),
+              as.numeric(s$QE),
+              as.numeric(s$k - 1),
+              as.numeric(s$QEp),
+              as.numeric(s$k),
+              as.character(fit_REML$method),
+              as.character(fit_REML$test))
+  )
+  
+  ## ---- Optional: full coefficient table (handles multiple moderators too) ----
+  coef_tbl <- data.frame(
+    term    = rownames(s$beta),
+    estimate = as.numeric(s$beta),
+    se       = as.numeric(s$se),
+    test_stat = as.numeric(s$zval),   # for knha this is typically t; metafor still stores in this slot
+    p_value  = as.numeric(s$pval),
+    ci_lb    = as.numeric(s$ci.lb),
+    ci_ub    = as.numeric(s$ci.ub),
+    row.names = NULL
+  )
+  
+  # ---- Optional: fitted values / residuals per study (robust) ----
+  k <- fit_REML$k
+  yi <- fit_REML$yi
+  vi <- fit_REML$vi
+  sei <- if (!is.null(fit_REML$sei) && length(fit_REML$sei) == k) fit_REML$sei else sqrt(vi)
+  
+  w <- as.numeric(weights(fit_REML))
+  fv <- as.numeric(fitted(fit_REML))
+  rs <- as.numeric(residuals(fit_REML))
+  
+  study_tbl <- data.frame(
+    study_id = seq_len(k),
+    yi = yi,
+    sei = sei,
+    vi = vi,
+    weight = w,
+    fitted = fv,
+    resid = rs,
+    row.names = NULL
+  )
+  
+  ## ---- Write to Excel (multiple sheets) ----
+  out_file <- "Background_corrected_mass_concentration_data/REML_meta_model_summary.xlsx"
+  write_xlsx(
+    list(
+      Parameters = params,
+      Coefficients = coef_tbl,
+      Studies = study_tbl
+    ),
+    path = out_file
+  )
+}
+
 # make plots
 mass_depth_table=data.frame(na.omit(mass_table[,10]), na.omit(mass_table[,11]))
 colnames(mass_depth_table) <- c("Mass Depth mi (g/cm^2)", "Mass Depth Uncertainty u(mi) (g/cm^2)")
