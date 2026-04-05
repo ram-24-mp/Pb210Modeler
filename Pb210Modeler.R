@@ -514,6 +514,10 @@ if (alpha_or_gamma==TRUE){
       scale_y_reverse(breaks = seq(min(background_table$y), max(background_table$y), by = 4)) +  # Set y-axis dynamically
       theme_minimal()  # Use a minimal theme
     print(background_table_plot)
+    
+    hit_background=readline(prompt = "Was equilibrium depth achieved? (True or False) ")
+    
+    if (hit_background==TRUE){
     first_background=as.numeric(readline(prompt = "At what index does background begin? "))
     background_value=mean(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
     check_for_negs=which((concentrations_table[1:(first_background-1),2]-background_value)<0)[1]
@@ -581,7 +585,11 @@ if (alpha_or_gamma==TRUE){
     accept_REML=readline(prompt = "Accept REML results? (True or False) ")
     accept_background_determination=readline(prompt = "Accept background determination? (True or False) ")
     }
+    }else{
+      break
+    }
   }
+  if (hit_background==TRUE){
   for (i in 1:nrow(concentrations_table)){
     if (i %% 2 == 0) {
       if (accept_REML==TRUE){
@@ -595,6 +603,14 @@ if (alpha_or_gamma==TRUE){
   }
   concentrations_table=concentrations_table[1:first_background-1,]
   mass_table=mass_table[1:first_background-1,]
+  }else{
+    for (i in 1:nrow(concentrations_table)){
+      if (i %% 2 == 0) {
+          concentrations_table[i,4]=0
+          concentrations_table[i,5]=0
+      }
+    }
+  }
 } else {
   print("select Gamma data")
   # Define the path to your Excel file
