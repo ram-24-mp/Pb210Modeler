@@ -81,6 +81,7 @@ numeric_date=year+(month-1)/12+(day-1)/365.24
 interval_constant=readline(prompt = "Is your interval thickness constant (True or False) ")
 # core dimensions, in cm
 if (interval_constant==TRUE){
+  print ("Diameter 10.0 +/- 0.1 cm, Interval Thickness 1 cm")
 dim_defaults=readline(prompt = "Accept Core Dimension Defaults (True or False) ")
 if (dim_defaults==TRUE){
   internal_diameter=10.0
@@ -130,6 +131,7 @@ for (i in 1:nrow(mass_table)){
   for (i in 1:how_many_thick){
     interval_thicknesses_list[i]=as.numeric(readline(prompt = paste("Enter interval thickness ", i, ": ")))
   }
+  print ("Diameter 10.0 +/- 0.1 cm")
   dim_defaults=readline(prompt = "Accept Core Dimension Defaults (True or False) ")
   if (dim_defaults==TRUE){
     internal_diameter=10.0
@@ -216,7 +218,7 @@ file_path=file.choose()
 # Specify the new column names
 new_column_names_mass_data <- c("X", "X.1")
 # Read the Excel file
-mass_data <- read_excel(file_path, col_names = TRUE, col_types = "numeric")
+mass_data <- read_excel(file_path, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
 mass_data=as.data.frame(mass_data)
 colnames(mass_data)=new_column_names_mass_data
 
@@ -337,7 +339,7 @@ if (alpha_or_gamma==TRUE){
   new_column_names_pb210_data <- c("X", "X.1", "X.2", "X.3")
   # Read the Excel file
   file_path2=file.choose()
-  pb210_data <- read_excel(file_path2, col_names = TRUE, col_types = "numeric")
+  pb210_data <- read_excel(file_path2, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
   if (ncol(pb210_data)==2){
     new_column_names_pb210_data=new_column_names_pb210_data[1:2]
   }
@@ -478,7 +480,7 @@ if (alpha_or_gamma==TRUE){
     length_finder_1=length(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])
     print(sd(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])/sqrt(length_finder_1))
   } else {
-    cat("No change points detected.\n")
+    cat("No change background detected.\n")
   }
   # end of background auto detection
   
@@ -617,7 +619,7 @@ if (alpha_or_gamma==TRUE){
   new_column_names_pb210_data <- c("X", "X.1", "X.2", "X.3")
   # Read the Excel file
   file_path2=file.choose()
-  pb210_data <- read_excel(file_path2, col_names = TRUE, col_types = "numeric")
+  pb210_data <- read_excel(file_path2, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
   colnames(pb210_data) <- new_column_names_pb210_data
   pb210_data=as.data.frame(pb210_data)
   
@@ -1110,7 +1112,7 @@ tlogpb210_md_plotting_table=as.data.frame(tlogpb210_md_plotting_table)
 tlogpb210_md_plot=ggplot(tlogpb210_md_plotting_table, aes(x = x, y = y)) +
   geom_point() +  # Add points
   geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  geom_smooth(method = "lm", formula = y ~ x,  se = FALSE, color = "red") +
   labs(title = "Excess Log-scale Pb-210 vs Cumulative Mass Depth", x = "Excess Log-scale Pb-210 (dmp/g)", y ="Cumulative Mass Depth (g/cm^2)") +  # Add labels
   scale_x_continuous(breaks = seq(min(tlogpb210_md_plotting_table$x), max(tlogpb210_md_plotting_table$x), by = breaks_by_value(tlogpb210_md_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(tlogpb210_md_plotting_table[,3]))) +  # Set x-axis dynamically
   scale_y_reverse(breaks = seq(min(tlogpb210_md_plotting_table$y), max(tlogpb210_md_plotting_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
@@ -1190,6 +1192,21 @@ CFCS_table[,1]=na.omit(concentrations_table[,1])
 CFCS_table[,2]=na.omit(concentrations_table[,12])
 CFCS_table[,3]=na.omit(concentrations_table[,13])
 CFCS_table=as.data.frame(CFCS_table)
+#start of SAZ auto detection
+SAZ_auto_detect=na.omit(concentrations_table[,6])
+SAZ_auto_detect=as.data.frame(SAZ_auto_detect)
+# Perform change point analysis
+cpt_result <- cpt.mean(SAZ_auto_detect[,1], method = "PELT", penalty = "SIC", minseglen = 3)
+# Get the change points
+change_points_SAZ <- cpts(cpt_result)
+if (length(change_points_SAZ) > 0 && (SAZ_auto_detect[change_points_SAZ[1],1]/core_length)<=0.3) {
+  
+  suggested_SAZ_index <- change_points_SAZ[1]
+  cat("Suggested SAZ terminates at index:", suggested_SAZ_index, "\n")
+} else {
+  cat("No SAZ detected.\n")
+}
+# end of SAZ auto detection
 CFCS_modeling_complete=FALSE
 SAZ_depth=0
   surface_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y", "x_uncertainty")))
@@ -1724,7 +1741,7 @@ print(ggplot(CFCS_table, aes(x = `Date (yr)`, y = `zi`)) +
         geom_errorbar(aes(xmin = `Date (yr)` - `Time Uncertainty (yr)`, 
                            xmax = `Date (yr)` + `Time Uncertainty (yr)`, 
                            y = `zi`,), 
-                       height = 0.2, color = "black") +  # Adjust height and color as needed
+                       width = 0.2, color = "black") +  # Adjust height and color as needed
         labs(title = "Age vs Depth Model") +
         scale_y_reverse() +
         scale_x_reverse())
@@ -1737,7 +1754,7 @@ print(ggplot(CFCS_table, aes(x = `Date (yr)`, y = `mi`)) +
         geom_errorbar(aes(xmin = `Date (yr)` - `Time Uncertainty (yr)`, 
                            xmax = `Date (yr)` + `Time Uncertainty (yr)`, 
                            y = `mi`), 
-                       height = 0.2, color = "black") +  # Adjust height and color as needed
+                       width = 0.2, color = "black") +  # Adjust height and color as needed
         labs(title = "Age vs Mass Depth Model") +
         scale_y_reverse() +
         scale_x_reverse())
@@ -2239,7 +2256,7 @@ elogpb210_md_plotting_table_CA[,3]=na.omit(concentrations_table[,14])
 elogpb210_md_plotting_table_CA=as.data.frame(elogpb210_md_plotting_table_CA)
 elogpb210_md_plot_CA=ggplot(elogpb210_md_plotting_table_CA, aes(x = x, y = y)) +
   geom_point() +  # Add points
-  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red") +
   labs(title = "Excess Log-scale Pb-210 vs Mass Depth", x = "Mass Depth (g/cm^2)", y ="Excess Log-scale Pb-210 (dmp/g)") +  # Add labels
   scale_y_continuous(breaks = seq(min(elogpb210_md_plotting_table_CA$y), max(elogpb210_md_plotting_table_CA$y), by = breaks_by_value(elogpb210_md_plotting_table_CA, "y")), labels=scales::number_format(accuracy=accuracy_finder(elogpb210_md_plotting_table_CA[,3]))) +  # Set x-axis dynamically
   scale_x_continuous(breaks = seq(min(elogpb210_md_plotting_table_CA$x), max(elogpb210_md_plotting_table_CA$x), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
@@ -2255,7 +2272,7 @@ elogpb210_plotting_table_CA[,3]=na.omit(concentrations_table[,14])
 elogpb210_plotting_table_CA=as.data.frame(elogpb210_plotting_table_CA)
 elogpb210_CA_plot=ggplot(elogpb210_plotting_table_CA, aes(x = x, y = y)) +
   geom_point() +  # Add points
-  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red") +
   labs(title = "Excess Log-scale Pb-210 vs Depth", x = "Depth (cm)", y ="Excess Log-scale Pb-210 (dmp/g)") +  # Add labels
   scale_y_continuous(breaks = seq(min(elogpb210_plotting_table_CA$y), max(elogpb210_plotting_table_CA$y), by = breaks_by_value(elogpb210_plotting_table_CA, "y")), labels=scales::number_format(accuracy=accuracy_finder(elogpb210_plotting_table_CA[,3]))) +  # Set x-axis dynamically
   scale_x_continuous(breaks = seq(min(elogpb210_plotting_table_CA$x), max(elogpb210_plotting_table_CA$x), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +
@@ -2435,7 +2452,7 @@ while (mat_accum_finished==TRUE){
 if (material_accum_opt==TRUE){
   print("select material data")
   file_path_new_mat=file.choose()
-  new_mat_dat <- read_excel(file_path_new_mat, col_names = TRUE, col_types = "numeric")
+  new_mat_dat <- read_excel(file_path_new_mat, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
   new_mat_dat=as.matrix(new_mat_dat)
   new_mat_dat=new_mat_dat[1:length(na.omit(CF_table[,10]))]
   new_mat_table=array(NA, dim=c(length(new_mat_dat),10))
