@@ -480,7 +480,7 @@ if (alpha_or_gamma==TRUE){
     length_finder_1=length(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])
     print(sd(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])/sqrt(length_finder_1))
   } else {
-    cat("No change background detected.\n")
+    cat("Background not detected.\n")
   }
   # end of background auto detection
   
