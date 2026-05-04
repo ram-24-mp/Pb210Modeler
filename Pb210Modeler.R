@@ -9,7 +9,6 @@ suppressPackageStartupMessages(library(scales))
 suppressPackageStartupMessages(library(segmented))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(zoo))
-suppressPackageStartupMessages(library(changepoint))
 suppressPackageStartupMessages(library(metafor))
 suppressPackageStartupMessages(library(rstudioapi))
 
