@@ -445,16 +445,138 @@ if (alpha_or_gamma==TRUE){
   pb210_data_auto_bkrng=na.omit(pb210_data)
   pb210_data_auto_bkrng=as.data.frame(pb210_data_auto_bkrng)
   pb210_data_auto_bkrng$X.2=log(pb210_data_auto_bkrng[,1])
-  # Perform change point analysis
-  cpt_result <- cpt.mean(pb210_data_auto_bkrng$X.2, method = "PELT", penalty = "SIC", minseglen = 3)
-  # Get the change points
-  change_points_bkgrnd <- cpts(cpt_result)
-  if (length(change_points_bkgrnd) > 0) {
-    suggested_background_index <- rownames(pb210_data_auto_bkrng)[change_points_bkgrnd[length(change_points_bkgrnd)]]
+  pb210_data_auto_bkrng$X.3=na.omit(concentrations_table[,1])
+  pb210_data_auto_bkrng=as.data.frame(pb210_data_auto_bkrng)
+  
+  #perform analysis
+  detect_pb210_background <- function(x, y,
+                                      hmin = 3,
+                                      slope_tol = NULL,      # dpm/g per cm; if NULL, data-driven
+                                      alpha_flat = 0.10,     # bottom slope == 0 (want large p)
+                                      alpha_diff = 0.05,     # slope differs above vs below (want small p)
+                                      min_drop = NULL,       # optional: require mean(top)-mean(bottom) >= min_drop
+                                      prefer_deep = TRUE) {
+    
+    x <- as.numeric(x); y <- as.numeric(y)
+    ok <- is.finite(x) & is.finite(y)
+    x <- x[ok]; y <- y[ok]
+    
+    o <- order(x)
+    x <- x[o]; y <- y[o]
+    
+    n <- length(y)
+    if (n < 2 * hmin + 1) {
+      return(list(present = FALSE, idx = integer(0), reason = "too_few_points"))
+    }
+    
+    # Default slope tolerance:
+    # take 10% of the absolute global slope, but never smaller than a noise-floor-based value.
+    if (is.null(slope_tol)) {
+      b_global <- coef(lm(y ~ x))[2]
+      # noise-floor: typical activity change over 1 cm due to scatter
+      noise_floor <- 0.25 * stats::mad(diff(y), constant = 1)  # dpm/g per step (~cm)
+      slope_tol <- max(0.1 * abs(b_global), noise_floor)
+      if (!is.finite(slope_tol) || slope_tol <= 0) slope_tol <- noise_floor
+    }
+    
+    # Optional mean-drop requirement default: 1 MAD of y
+    if (is.null(min_drop)) {
+      min_drop <- stats::mad(y, constant = 1)
+      if (!is.finite(min_drop) || min_drop < 0) min_drop <- 0
+    }
+    
+    j_grid <- (hmin + 1):(n - hmin)
+    
+    rows <- lapply(j_grid, function(j) {
+      top <- 1:(j - 1)
+      bot <- j:n
+      
+      fit_top <- lm(y[top] ~ x[top])
+      fit_bot <- lm(y[bot] ~ x[bot])
+      
+      b_top <- unname(coef(fit_top)[2])
+      b_bot <- unname(coef(fit_bot)[2])
+      
+      se_top <- summary(fit_top)$coefficients[2, 2]
+      se_bot <- summary(fit_bot)$coefficients[2, 2]
+      
+      df_top <- length(top) - 2
+      df_bot <- length(bot) - 2
+      
+      # bottom slope == 0 test (want NOT significant)
+      t0 <- b_bot / se_bot
+      p_flat <- 2 * pt(abs(t0), df = df_bot, lower.tail = FALSE)
+      
+      # slope difference test (want significant)
+      tdiff <- (b_top - b_bot) / sqrt(se_top^2 + se_bot^2)
+      df_diff <- (se_top^2 + se_bot^2)^2 / ((se_top^4 / df_top) + (se_bot^4 / df_bot))
+      p_diff <- 2 * pt(abs(tdiff), df = df_diff, lower.tail = FALSE)
+      
+      mu_top <- mean(y[top])
+      mu_bot <- mean(y[bot])
+      drop <- mu_top - mu_bot
+      
+      data.frame(
+        j = j,
+        x_at_start = x[j],
+        n_top = length(top),
+        n_bot = length(bot),
+        slope_top = b_top,
+        slope_bot = b_bot,
+        p_flat = p_flat,
+        p_diff = p_diff,
+        drop = drop,
+        abs_slope_bot = abs(b_bot)
+      )
+    })
+    
+    tab <- do.call(rbind, rows)
+    
+    keep <- with(tab,
+                 abs_slope_bot <= slope_tol &
+                   p_diff <= alpha_diff &
+                   drop >= min_drop
+    )
+    
+    if (!any(keep)) {
+      return(list(
+        present = FALSE,
+        idx = integer(0),
+        slope_tol = slope_tol,
+        min_drop = min_drop,
+        candidates = tab
+      ))
+    }
+    
+    cand <- tab[keep, , drop = FALSE]
+    best <- cand[order(cand$j), ][1, , drop = FALSE]   # earliest passing j
+    
+    list(
+      present = TRUE,
+      idx = best$j,            # index in x/y after sorting by depth
+      x_at_start = best$x_at_start,
+      slope_bot = best$slope_bot,
+      slope_tol = slope_tol,
+      min_drop = min_drop,
+      best_row = best,
+      candidates = tab
+    )
+  }
+  
+  # Use with your columns (y = dpm/g, x = cm)
+  y <- pb210_data_auto_bkrng[, 1]
+  x <- pb210_data_auto_bkrng[, 4]
+  res <- detect_pb210_background(x, y, hmin = 3)
+  res$present
+  res$idx
+  res$x_at_start
+  res$slope_bot
+  if (res$present==TRUE) {
+    suggested_background_index <- rownames(pb210_data_auto_bkrng)[ res$idx ]
     cat("Suggested background activity begins at index:", suggested_background_index, "\n")
     # REML start
-    y_REML   <- na.omit(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])
-    sei_REML <- na.omit(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 2])
+    y_REML   <- na.omit(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1])
+    sei_REML <- na.omit(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 2])
     
     ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
     y_REML   <- y_REML[ok_REML]
@@ -475,10 +597,10 @@ if (alpha_or_gamma==TRUE){
     print(se_mu)
     print("Arthmetic Mean & Standard Error Reference Values")
     print("Pb-210 Background Activity (dmp/g)")
-    print(mean(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1]))
+    print(mean(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1]))
     print("Pb-210 Background Activity Uncertainty (dmp/g)")
-    length_finder_1=length(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])
-    print(sd(pb210_data_auto_bkrng[change_points_bkgrnd[length(change_points_bkgrnd)]:length(pb210_data_auto_bkrng[,1]), 1])/sqrt(length_finder_1))
+    length_finder_1=length(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1])
+    print(sd(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1])/sqrt(length_finder_1))
   } else {
     cat("Background not detected.\n")
   }
@@ -1195,13 +1317,123 @@ CFCS_table=as.data.frame(CFCS_table)
 #start of SAZ auto detection
 SAZ_auto_detect=na.omit(concentrations_table[,6])
 SAZ_auto_detect=as.data.frame(SAZ_auto_detect)
-# Perform change point analysis
-cpt_result <- cpt.mean(SAZ_auto_detect[,1], method = "PELT", penalty = "SIC", minseglen = 3)
-# Get the change points
-change_points_SAZ <- cpts(cpt_result)
-if (length(change_points_SAZ) > 0 && (SAZ_auto_detect[change_points_SAZ[1],1]/core_length)<=0.3) {
+SAZ_auto_detect$X.2=na.omit(concentrations_table[,1])
+SAZ_auto_detect=as.data.frame(SAZ_auto_detect)
+# Perform analysis
+detect_pb210_reworking_top <- function(x, y,
+                                       hmin = 3,
+                                       slope_tol = NULL,      # dpm/g per cm; if NULL, data-driven
+                                       alpha_diff = 0.05,     # slope differs below vs above (want small p)
+                                       min_rise = NULL) {     # require mean(below)-mean(top) >= min_rise
   
-  suggested_SAZ_index <- change_points_SAZ[1]
+  x <- as.numeric(x); y <- as.numeric(y)
+  ok <- is.finite(x) & is.finite(y)
+  x <- x[ok]; y <- y[ok]
+  
+  o <- order(x)
+  x <- x[o]; y <- y[o]
+  
+  n <- length(y)
+  if (n < 2 * hmin + 1) {
+    return(list(present = FALSE, idx = integer(0), reason = "too_few_points"))
+  }
+  
+  if (is.null(slope_tol)) {
+    b_global <- coef(lm(y ~ x))[2]
+    noise_floor <- 0.25 * stats::mad(diff(y), constant = 1)
+    slope_tol <- max(0.1 * abs(b_global), noise_floor)
+    if (!is.finite(slope_tol) || slope_tol <= 0) slope_tol <- noise_floor
+  }
+  
+  if (is.null(min_rise)) {
+    min_rise <- stats::mad(y, constant = 1)
+    if (!is.finite(min_rise) || min_rise < 0) min_rise <- 0
+  }
+  
+  # j = last index of the "flat top" segment (top = 1:j, below = (j+1):n)
+  j_grid <- hmin:(n - hmin)
+  
+  rows <- lapply(j_grid, function(j) {
+    top <- 1:j
+    bot <- (j + 1):n
+    
+    fit_top <- lm(y[top] ~ x[top])
+    fit_bot <- lm(y[bot] ~ x[bot])
+    
+    b_top <- unname(coef(fit_top)[2])
+    b_bot <- unname(coef(fit_bot)[2])
+    
+    se_top <- summary(fit_top)$coefficients[2, 2]
+    se_bot <- summary(fit_bot)$coefficients[2, 2]
+    
+    df_top <- length(top) - 2
+    df_bot <- length(bot) - 2
+    
+    # slope difference test (want significant)
+    tdiff <- (b_bot - b_top) / sqrt(se_top^2 + se_bot^2)
+    df_diff <- (se_top^2 + se_bot^2)^2 / ((se_top^4 / df_top) + (se_bot^4 / df_bot))
+    p_diff <- 2 * pt(abs(tdiff), df = df_diff, lower.tail = FALSE)
+    
+    mu_top <- mean(y[top])
+    mu_bot <- mean(y[bot])
+    rise <- mu_bot - mu_top
+    
+    data.frame(
+      j = j,
+      x_end_top = x[j],
+      n_top = length(top),
+      n_bot = length(bot),
+      slope_top = b_top,
+      abs_slope_top = abs(b_top),
+      slope_bot = b_bot,
+      p_diff = p_diff,
+      rise = rise
+    )
+  })
+  
+  tab <- do.call(rbind, rows)
+  
+  keep <- with(tab,
+               abs_slope_top <= slope_tol &
+                 p_diff <= alpha_diff &
+                 rise >= min_rise)
+  
+  if (!any(keep)) {
+    return(list(
+      present = FALSE,
+      idx = integer(0),
+      slope_tol = slope_tol,
+      min_rise = min_rise,
+      candidates = tab
+    ))
+  }
+  
+  cand <- tab[keep, , drop = FALSE]
+  best <- cand[order(cand$j), ][1, , drop = FALSE]   # earliest end-of-flat-top
+  
+  list(
+    present = TRUE,
+    idx = best$j,              # last index in the flat top (after sorting by depth)
+    x_end_top = best$x_end_top,
+    slope_top = best$slope_top,
+    slope_tol = slope_tol,
+    min_rise = min_rise,
+    best_row = best,
+    candidates = tab
+  )
+}
+
+# Use (y = dpm/g, x = cm)
+y <- SAZ_auto_detect[, 1]
+x <- SAZ_auto_detect[, 2]
+res_top <- detect_pb210_reworking_top(x, y, hmin = 3)
+
+res_top$present
+res_top$idx        # end index of the flat mixed layer
+res_top$x_end_top
+if (res_top$present==TRUE) {
+  
+  suggested_SAZ_index <- res_top$idx
   cat("Suggested SAZ terminates at index:", suggested_SAZ_index, "\n")
 } else {
   cat("No SAZ detected.\n")
