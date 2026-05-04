@@ -1973,7 +1973,7 @@ print(ggplot(CFCS_table, aes(x = `Date (yr)`, y = `zi`)) +
                            xmax = `Date (yr)` + `Time Uncertainty (yr)`, 
                            y = `zi`,), 
                        width = 0.2, color = "black") +  # Adjust height and color as needed
-        labs(title = "Age vs Depth Model", y = "Mid-Depth (cm)", x="Year (CE)") +
+        labs(title = "Age vs Depth Model", y = "Mid Depth (cm)", x="Year (CE)") +
         scale_y_reverse() +
         scale_x_reverse())
 dev.off()
@@ -2504,7 +2504,7 @@ elogpb210_plotting_table_CA=as.data.frame(elogpb210_plotting_table_CA)
 elogpb210_CA_plot=ggplot(elogpb210_plotting_table_CA, aes(x = x, y = y)) +
   geom_point() +  # Add points
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red") +
-  labs(title = "Excess Log-scale Pb-210 vs Depth", x = "Mid-Depth (cm)", y ="Excess Log-scale Pb-210 (dmp/g)") +  # Add labels
+  labs(title = "Excess Log-scale Pb-210 vs Depth", x = "Mid Depth (cm)", y ="Excess Log-scale Pb-210 (dmp/g)") +  # Add labels
   scale_y_continuous(breaks = seq(min(elogpb210_plotting_table_CA$y), max(elogpb210_plotting_table_CA$y), by = breaks_by_value(elogpb210_plotting_table_CA, "y")), labels=scales::number_format(accuracy=accuracy_finder(elogpb210_plotting_table_CA[,3]))) +  # Set x-axis dynamically
   scale_x_continuous(breaks = seq(min(elogpb210_plotting_table_CA$x), max(elogpb210_plotting_table_CA$x), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +
   theme_minimal()  # Use a minimal theme
@@ -2654,7 +2654,7 @@ CA_age_md_table = as.data.frame(CA_age_md_table)
 CA_age_md_table_plot = ggplot(CA_age_md_table, aes(x = x, y = y)) +
   geom_point() +  # Add points
   geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Age vs Mass Depth", x = "Year (CE)", y = "Mass Depth (g/cm^2)") +  # Add labels
+  labs(title = "Age vs Mass Depth", x = "Year (CE)", y = "Cumulative Mass Depth (g/cm^2)") +  # Add labels
   scale_x_reverse(breaks = seq(min(CA_age_md_table$x), max(CA_age_md_table$x), by = 10), 
                   labels = number_format(accuracy = 1)) +  # Set x-axis increments of 10 without decimals
   scale_y_reverse(breaks = seq(min(CA_age_md_table$y), max(CA_age_md_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +
