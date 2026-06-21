@@ -2,15 +2,76 @@
 #https://github.com/ram-24-mp/Pb210Modeler
 
 #packages needed
-suppressPackageStartupMessages(library(readxl))
-suppressPackageStartupMessages(library(writexl))
-suppressPackageStartupMessages(library(ggplot2))
-suppressPackageStartupMessages(library(scales))
-suppressPackageStartupMessages(library(segmented))
-suppressPackageStartupMessages(library(dplyr))
-suppressPackageStartupMessages(library(zoo))
-suppressPackageStartupMessages(library(metafor))
-suppressPackageStartupMessages(library(rstudioapi))
+script_version <- "1.1"
+
+required_packages <- c(
+  "jsonlite",
+  "readxl",
+  "writexl",
+  "ggplot2",
+  "scales",
+  "segmented",
+  "dplyr",
+  "zoo",
+  "metafor",
+  "rstudioapi"
+)
+
+installed <- rownames(installed.packages())
+to_install <- setdiff(required_packages, installed)
+
+if (length(to_install) > 0) {
+  suppressWarnings(
+    suppressMessages(
+      install.packages(to_install, dependencies = TRUE, quiet = TRUE)
+    )
+  )
+}
+
+old_pkgs <- old.packages()
+
+if (!is.null(old_pkgs)) {
+  to_update <- intersect(required_packages, rownames(old_pkgs))
+  
+  if (length(to_update) > 0) {
+    suppressWarnings(
+      suppressMessages(
+        install.packages(to_update, dependencies = TRUE, quiet = TRUE)
+      )
+    )
+  }
+}
+
+invisible(lapply(required_packages, function(pkg) {
+  suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+}))
+
+check_for_script_update <- function(current_version) {
+  api_url <- "https://api.github.com/repos/ram-24-mp/Pb210Modeler/releases/latest"
+  
+  latest_version <- tryCatch({
+    x <- jsonlite::fromJSON(api_url)
+    sub("^v", "", trimws(x$tag_name))
+  }, error = function(e) NA_character_)
+  
+  if (is.na(latest_version) || latest_version == "") {
+    message("Could not check for script updates.")
+    return(invisible(FALSE))
+  }
+  
+  if (utils::compareVersion(latest_version, current_version) > 0) {
+    message(sprintf(
+      "A newer version is available: %s (current: %s)",
+      latest_version, current_version
+    ))
+    return(invisible(TRUE))
+  }
+  
+  message("Script is up to date.")
+  invisible(FALSE)
+}
+
+check_for_script_update(script_version)
 
 rm(list = ls(all.names = TRUE))
 
@@ -105,8 +166,8 @@ decay_const_uncer= decay_const*(0.12/22.23*100)/100
 
 # masses
 # dry bulk density g cm^-3 & corresponding uncertainty columns are provided by user. Data must be entered with empty row between each entry
-mass_table=array(data=NA, dim=c((((core_length*2)/interval_thickness)+1), 11), dimnames=list(NULL, c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Interval Thickness delta zi (cm)","Dry Bulk Density DBD gcm^-3","Dry Bulk Density Uncertainty u(DBD) gcm^-3","Aerial Dry Mass delta mi/S gcm^-2","Aerial Dry Mass Uncertainty u(delta mi/S) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2")))
-
+mass_table=array(data=NA, dim=c((((core_length*2)/interval_thickness)+1), 11), dimnames=list(NULL, c("Top of Interval z(i) cm", "Mid Depth zi cm","Interval Thickness delta zi cm","Dry Bulk Density DBD gcm^-3","Dry Bulk Density Uncertainty u(DBD) gcm^-3","Aerial Dry Mass delta mi/S gcm^-2","Aerial Dry Mass Uncertainty u(delta mi/S) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2")))
+dimnames(mass_table)[[2]] <- gsub("delta", "\u0394", dimnames(mass_table)[[2]])
 #populate z information
 for (i in 1:nrow(mass_table)){
   if (i==1){
@@ -176,6 +237,7 @@ for (i in 1:nrow(mass_table)){
   mass_table_rows <- 2 * n_intervals+1
   
   mass_table=array(data=NA, dim=c(mass_table_rows, 11), dimnames=list(NULL, c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Interval Thickness delta zi (cm)","Dry Bulk Density DBD gcm^-3","Dry Bulk Density Uncertainty u(DBD) gcm^-3","Aerial Dry Mass delta mi/S gcm^-2","Aerial Dry Mass Uncertainty u(delta mi/S) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2")))
+  colnames(mass_table) <- gsub("delta", "\u0394", colnames(mass_table))
   # 1) Build boundary depths
   boundary_depths <- numeric(0)
   
@@ -328,7 +390,8 @@ for (i in 1:nrow(mass_table)-1){
   }
 }
 # create the concentrations table and begin preliminary population
-concentrations_table=array(data=NA, dim=c((nrow(mass_table)-1), 14), dimnames=list(NULL, c("Mid Depth zi (cm)","Total Pb-210 dmp/g","Total Pb-210 Uncertainty u(Pb-210) dmp/g","Supported Pb-210 dmp/g","Supported Pb-210 Uncertainty u(sPb-210) dmp/g","Excess Pb-210 Ci dmp/g","Excess Pb-210 Uncertainty u(Ci) dmp/g","Excess Pb-210 C(i) dmp/g","Excess Pb-210 Uncertainty u(C(i)) dmp/g","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Mass Depth mi (g/cm^2)","ln(Ci)","u(ln(Ci))"))) #did it break?
+concentrations_table=array(data=NA, dim=c((nrow(mass_table)-1), 14), dimnames=list(NULL, c("Mid Depth zi cm","Total Pb-210 dmp/g","Total Pb-210 Uncertainty u(Pb-210) dmp/g","Supported Pb-210 dmp/g","Supported Pb-210 Uncertainty u(sPb-210) dmp/g","Excess Pb-210 Ci dmp/g","Excess Pb-210 Uncertainty u(Ci) dmp/g","Excess Pb-210 C(i) dmp/g","Excess Pb-210 Uncertainty u(C(i)) dmp/g","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Mass Depth mi g/cm^2","ln(Ci)","u(ln(Ci))"))) #did it break?
+colnames(concentrations_table) <- gsub("delta", "\u0394", colnames(concentrations_table))
 concentrations_table[,1]=mass_table[1:nrow(concentrations_table),2]
 concentrations_table[,12]=mass_table[1:nrow(concentrations_table),10]
 # load in Pb-210 data, assign Alpha or Gamma methods, and fill activity data
@@ -963,22 +1026,22 @@ if (!is.null(destination_folder) && destination_folder != "") {
   print("No folder selected.")
 }
 #start saving process
-folder_name = "Background_corrected_mass_concentration_data"
+folder_name = "Background corrected mass and concentration data"
 
 # Create the folder in the working directory
 dir.create(folder_name)
 
 # Define the file path where you want to save the file
-mass_file_path <- file.path(folder_name, "mass_table.csv")
+mass_file_path <- file.path(folder_name, "mass_table.xlsx")
 
-# Save the data frame as a CSV file in the new folder
-write.csv(mass_table, mass_file_path, row.names = FALSE, na = "")
+# Save the table as an Excel file
+write_xlsx(as.data.frame(mass_table), mass_file_path)
 
 # Define the file path where you want to save the file
-concentrations_file_path <- file.path(folder_name, "concentrations_data.csv")
+concentrations_file_path <- file.path(folder_name, "concentrations_data.xlsx")
 
-# Save the data frame as a CSV file in the new folder
-write.csv(concentrations_table, concentrations_file_path, row.names = FALSE, na = "")
+# Save the table as an Excel file
+write_xlsx(as.data.frame(concentrations_table), concentrations_file_path)
 
 #C0CA save
 model_summaries <- data.frame(Model = character(),
@@ -1015,7 +1078,7 @@ for (model_index in seq_along(C0CA_model_list)) {
     cat("Model at index", model_index, "is NULL or invalid.\n")
   }
 }
-write_xlsx(model_summaries, path = "Background_corrected_mass_concentration_data/C0CA_model_summaries.xlsx")
+write_xlsx(model_summaries, path = "Background corrected mass and concentration data/C0CA_model_summaries.xlsx")
 
 #REML save
 if (exists("fit_REML", inherits = TRUE) && inherits(get("fit_REML", inherits = TRUE), "rma.uni")) {
@@ -1074,7 +1137,7 @@ if (exists("fit_REML", inherits = TRUE) && inherits(get("fit_REML", inherits = T
   )
   
   ## ---- Write to Excel (multiple sheets) ----
-  out_file <- "Background_corrected_mass_concentration_data/REML_meta_model_summary.xlsx"
+  out_file <- "Background corrected mass and concentration data/REML_meta_model_summary.xlsx"
   write_xlsx(
     list(
       Parameters = params,
@@ -1305,10 +1368,10 @@ constants_table_csv$value <- vapply(
   character(1)
 )
 
-constants_file_path <- file.path(folder_name, "constants_table.csv")
-write.csv(constants_table, constants_file_path, row.names=FALSE)
+constants_file_path <- file.path(folder_name, "constants_table.xlsx")
+write_xlsx(constants_table_csv, constants_file_path)
 #start of CFCS section
-CFCS_table=array(data=NA, dim=c(nrow(concentrations_table)/2,6), dimnames=list(NULL,c("zi","mi","ln(Ci)","Time (yr)","Date (yr)", "Time Uncertainty (yr)")))
+CFCS_table=array(data=NA, dim=c(nrow(concentrations_table)/2,6), dimnames=list(NULL,c("zi","mi","ln(Ci)","Time yr","Date (yr)", "Time Uncertainty (yr)")))
 CFCS_table[,1]=na.omit(concentrations_table[,1])
 CFCS_table[,2]=na.omit(concentrations_table[,12])
 CFCS_table[,3]=na.omit(concentrations_table[,13])
@@ -1724,8 +1787,10 @@ for (i in 1:number_of_models){
 
 folder_name2 = "CFCS modeling data"
 dir.create(folder_name2)
-CFCS_table_path <- file.path(folder_name2, "CFCS_table.csv")
-write.csv(CFCS_table, CFCS_table_path, row.names = FALSE, na = "")
+CFCS_table_path <- file.path(folder_name2, "CFCS_table.xlsx")
+colnames(CFCS_table)[c(1, 2, 3, 5)] <- c("Mid Depth zi cm", "Mass Depth Section mi gcm^-2", "log-scale Excess Pb-210 ln(Ci) dmp/g", "Date CE")
+write_xlsx(as.data.frame(CFCS_table), CFCS_table_path)
+colnames(CFCS_table)[c(1, 2, 3, 5)] <- c("zi","mi","ln(Ci)", "Date (yr)")
 # save the MAR/SAR rates and uncertainties to files
 #MAR version
 rownames_MAR_rates=c()
@@ -1743,7 +1808,7 @@ for ( i in 1:length(list_of_models)){
 }
 rownames(MAR_rates)=rownames_MAR_rates
 }
-MAR_rates_path <- file.path(folder_name2, "MAR_rates.csv")
+MAR_rates_path <- file.path(folder_name2, "MAR_rates.xlsx")
 if (number_of_models>1){
   MAR_final_slope=summary(list_of_models_MAR[[length(list_of_models_MAR)]])$coefficients[2, "Estimate"]
   MAR_final_slope_err=summary(list_of_models_MAR[[length(list_of_models_MAR)]])$coefficients[2, 2]
@@ -1752,7 +1817,7 @@ if (number_of_models>1){
   MAR_final_slope_err=summary(changepoint_detection_model_MAR)$coefficients[2, 2]
 }
 
-write.csv(MAR_rates, MAR_rates_path, row.names = TRUE)
+write_xlsx(as.data.frame(MAR_rates), MAR_rates_path)
 missing_inventory=(concentrations_table[(nrow(concentrations_table)),6]*(-decay_const/MAR_final_slope))/decay_const
 MAR_final=(-decay_const/MAR_final_slope)
 MAR_final_err=(-decay_const/MAR_final_slope)*sqrt((MAR_final_slope_err/MAR_final_slope)^2+(decay_const_uncer/decay_const)^2)
@@ -1772,8 +1837,8 @@ if (number_of_models==1){
   }
   rownames(SAR_rates)=rownames_SAR_rates
 }
-SAR_rates_path <- file.path(folder_name2, "SAR_rates.csv")
-write.csv(SAR_rates, SAR_rates_path, row.names = TRUE)
+SAR_rates_path <- file.path(folder_name2, "SAR_rates.xlsx")
+write_xlsx(as.data.frame(SAR_rates), SAR_rates_path)
 
 ##save changepoint models, if they are used
 if (number_of_models==1){
@@ -2001,7 +2066,8 @@ finish_CFCS=readline(prompt = "CFCS modeling complete. Continue to CF? (True or 
 #start of CF section
 if (finish_CFCS==TRUE){
 #create CF table and begin populating it
-CF_table=array(data=NA, dim=c(nrow(mass_table),17), dimnames=list(NULL,c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
+CF_table=array(data=NA, dim=c(nrow(mass_table),17), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
+colnames(CF_table) <- gsub("delta", "\u0394", colnames(CF_table))
 CF_table[,1:2]=mass_table[,1:2]
 CF_table[1:nrow(concentrations_table),3]=concentrations_table[,10]
 CF_table[1:nrow(concentrations_table),4]=concentrations_table[,11]
@@ -2103,8 +2169,8 @@ for (i in 1:(nrow(CF_table)-2)){
 #save the data
 folder_name3 = "CF modeling data"
 dir.create(folder_name3)
-CF_table_path <- file.path(folder_name3, "CF_table.csv")
-write.csv(CF_table, CF_table_path, row.names = FALSE, na = "")
+CF_table_path <- file.path(folder_name3, "CF_table.xlsx")
+write_xlsx(as.data.frame(CF_table), CF_table_path)
 # year plot vs layer depth-z(i)
 pdf(file.path(folder_name3, "age_vs_layer_depth.pdf"), width = 8, height = 6)
 CF_age_table = array(data = NA, dim = c(length(na.omit(CF_table[, 9])), 3), dimnames = list(NULL, c("x", "x_uncertainty", "y")))
@@ -2236,7 +2302,7 @@ write_xlsx(model_summaries_DBD, path = "CF modeling data/DBD_model_summaries.xls
 if (surface_active_zone_check==FALSE){
 folder_name5 = "CF_CFCS model comparisons"
 dir.create(folder_name5)
-CF_CFCS_table=array(data=NA, dim=c(nrow(mass_table),6), dimnames=list(NULL,c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Mass Depth Section mi gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","CF Age (CE)","CFCS Age (CE)")))
+CF_CFCS_table=array(data=NA, dim=c(nrow(mass_table),6), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Mass Depth Section mi gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","CF Age CE","CFCS Age CE")))
 CF_CFCS_table[,1:2]=mass_table[,1:2]
 CF_CFCS_table[,3]=mass_table[,10]
 CF_CFCS_table[,4]=mass_table[,8]
@@ -2263,9 +2329,9 @@ CF_CFCS_table[1:length(CFCS_format_fix),6]=CFCS_format_fix
 #make the comparison plot
 CF_CFCS_table=as.matrix(CF_CFCS_table)
 # CF table for depth plot
-CF_comp_z_table=na.omit(as.matrix(CF_CFCS_table[, c("Top of Interval z(i) (cm)", "CF Age (CE)")]))
+CF_comp_z_table=na.omit(as.matrix(CF_CFCS_table[, c("Top of Interval z(i) cm", "CF Age CE")]))
 #CFCS table for depth plot
-CFCS_comp_z_table=na.omit(as.matrix(CF_CFCS_table[, c("Mid Depth zi (cm)", "CFCS Age (CE)")]))
+CFCS_comp_z_table=na.omit(as.matrix(CF_CFCS_table[, c("Mid Depth zi cm", "CFCS Age CE")]))
 #make the plot
 pdf(file.path(folder_name5, "age_comp_z.pdf"), width = 8, height = 6)
 CF_comp_z_table <- as.data.frame(CF_comp_z_table)
@@ -2362,7 +2428,7 @@ CF_CFCS_comp_plot_md=ggplot(combined_data_md, aes(x = Age, y = Depth, color = So
 print(CF_CFCS_comp_plot_md)
 dev.off()
 # save the cf/cfcs table to CSV
-write.csv(CF_CFCS_table, "CF_CFCS model comparisons/CF_CFCS_table.csv", row.names = FALSE, na = "")
+write_xlsx(as.data.frame(CF_CFCS_table), "CF_CFCS model comparisons/CF_CFCS_table.xlsx")
 }
 #completion dialogue for CF
 finish_CF=FALSE
@@ -2373,8 +2439,8 @@ print(atm_flux)
 flux_table=array(data=NA, dim=c(1,2), dimnames=list(NULL, c("Atmospheric Pb-210 Flux (dpm cm^2/yr)", "Atmospheric Pb-210 Flux Uncertainty (dpm cm^2/yr)")))
 flux_table[1,1]=atm_flux
 flux_table[1,2]=atm_flux_uncer
-flux_table_path <- file.path(folder_name3, "atm_pb210_flux.csv")
-write.csv(flux_table, flux_table_path, row.names = FALSE, na = "")
+flux_table_path <- file.path(folder_name3, "atm_pb210_flux.xlsx")
+write_xlsx(as.data.frame(flux_table), flux_table_path)
 
   print("missing inventory %")
   print(as.numeric((missing_inventory/CF_table[1,5])*100))
@@ -2407,8 +2473,8 @@ if (SAZ_depth!=0){
 }
 core_boundary_info[1,3]=missing_inventory
 core_boundary_info[1,4]=(missing_inventory/CF_table[1,5])*100
-boundary_table_path <- file.path(folder_name3, "core_boundary_info.csv")
-write.csv(core_boundary_info, boundary_table_path, row.names = FALSE, na = "")
+boundary_table_path <- file.path(folder_name3, "core_boundary_info.xlsx")
+write_xlsx(as.data.frame(core_boundary_info), boundary_table_path)
 }else{
   finish_CF=readline(prompt = "CF modeling skipped. Do you want to continue to CA? (True or False) ")
 }
@@ -2416,7 +2482,8 @@ write.csv(core_boundary_info, boundary_table_path, row.names = FALSE, na = "")
 #start of CA section
 if (finish_CF==TRUE){
 #initialize array
-CA_table=array(data=NA, dim=c((nrow(concentrations_table)+1),17), dimnames=list(NULL,c("Mid Depth zi cm", "ln(Ci)","Age ti yr","Age Uncertainty u(ti) yr","CIC Age (CE)","ur(l)","ur(C0)","ur(Ci)","t(i) yr","u(t(i)) yr","delta t yr","Uncertainty delta t yr"," Sediment Accumulation Rate s cm/yr","Sediment Accumulation Rate Uncertainty u(s) cm/yr","Mass Accumualtion Rate r g/(cm^2 yr)","Mass Accumualtion Rate Uncertainty u(r) g/(cm^2 yr)","Mass Depth Section mi gcm^-2")))
+CA_table=array(data=NA, dim=c((nrow(concentrations_table)+1),17), dimnames=list(NULL,c("Mid Depth zi cm", "ln(Ci)","Age ti yr","Age Uncertainty u(ti) yr","CIC Age CE","ur(l)","ur(C0)","ur(Ci)","t(i) yr","u(t(i)) yr","delta t yr","Uncertainty delta t yr"," Sediment Accumulation Rate s cm/yr","Sediment Accumulation Rate Uncertainty u(s) cm/yr","Mass Accumualtion Rate r g/(cm^2 yr)","Mass Accumualtion Rate Uncertainty u(r) g/(cm^2 yr)","Mass Depth Section mi gcm^-2")))
+colnames(CA_table) <- gsub("delta", "\u0394", colnames(CA_table))
 # load copied data
 CA_table[,1]=mass_table[,2]
 CA_table[1:nrow(concentrations_table),2]=concentrations_table[,13]
@@ -2474,8 +2541,8 @@ for (i in 1:(nrow(CA_table))){
 # save off the data
 folder_name4 = "CA modeling data"
 dir.create(folder_name4)
-CA_table_path <- file.path(folder_name4, "CA_table.csv")
-write.csv(CA_table, CA_table_path, row.names = FALSE, na = "")
+CA_table_path <- file.path(folder_name4, "CA_table.xlsx")
+write_xlsx(as.data.frame(CA_table), CA_table_path)
 
 #make the plots
 #log actvity/mass depth
