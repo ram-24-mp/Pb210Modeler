@@ -2,7 +2,7 @@
 #https://github.com/ram-24-mp/Pb210Modeler
 
 # package startup
-script_version <- "1.1"
+script_version <- "1.2"
 
 required_packages <- c(
   "jsonlite", "readxl", "writexl", "ggplot2",
