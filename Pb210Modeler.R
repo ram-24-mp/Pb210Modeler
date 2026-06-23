@@ -1,56 +1,133 @@
 #For updates and bug fixes, please see the actively maintained version of Pb210Modeler:
 #https://github.com/ram-24-mp/Pb210Modeler
 
-#packages needed
+# package startup
 script_version <- "1.1"
 
 required_packages <- c(
-  "jsonlite",
-  "readxl",
-  "writexl",
-  "ggplot2",
-  "scales",
-  "segmented",
-  "dplyr",
-  "zoo",
-  "metafor",
-  "rstudioapi"
+  "jsonlite", "readxl", "writexl", "ggplot2",
+  "scales", "segmented", "dplyr", "zoo", "metafor"
 )
 
-installed <- rownames(installed.packages())
-to_install <- setdiff(required_packages, installed)
+min_versions <- c(
+  rlang = "1.1.7",
+  vctrs = "0.6.5"
+)
 
-if (length(to_install) > 0) {
-  suppressWarnings(
-    suppressMessages(
-      install.packages(to_install, dependencies = TRUE, quiet = TRUE)
+get_latest_r_version <- function() {
+  urls <- c(
+    "https://cran.r-project.org/bin/windows/base/release.htm",
+    "https://cran.r-project.org/bin/macosx/",
+    "https://cran.r-project.org/"
+  )
+  
+  for (u in urls) {
+    txt <- tryCatch(readLines(u, warn = FALSE), error = function(e) NULL)
+    if (is.null(txt)) next
+    x <- paste(txt, collapse = "\n")
+    
+    m <- regmatches(
+      x,
+      gregexpr("\\bR[- ]([0-9]+\\.[0-9]+\\.[0-9]+)\\b", x, perl = TRUE)
+    )[[1]]
+    
+    if (length(m) == 0) next
+    
+    vers <- sub("^R[- ]", "", m)
+    vers <- unique(vers[nzchar(vers)])
+    if (length(vers) == 0) next
+    
+    return(as.character(sort(numeric_version(vers), decreasing = TRUE)[1]))
+  }
+  
+  NA_character_
+}
+
+check_r_version_current <- function() {
+  current_r <- as.character(getRversion())
+  latest_r <- get_latest_r_version()
+  
+  if (is.na(latest_r) || !nzchar(latest_r)) {
+    message("Could not check whether R is up to date.")
+    return(invisible(FALSE))
+  }
+  
+  if (utils::compareVersion(current_r, latest_r) < 0) {
+    stop(
+      paste0(
+        "Your R version is out of date (current: ", current_r,
+        ", latest: ", latest_r, ").\n",
+        "Please update R with install.packages('installr'); installr::updateR(), restart R, and run the script again."
+      ),
+      call. = FALSE
     )
+  }
+  
+  message("R is up to date.")
+  invisible(TRUE)
+}
+
+check_installed_version <- function(pkg, min_version) {
+  if (!requireNamespace(pkg, quietly = TRUE)) return(FALSE)
+  utils::compareVersion(as.character(utils::packageVersion(pkg)), min_version) >= 0
+}
+
+install_missing_packages <- function(pkgs) {
+  missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+  
+  if (length(missing) == 0) return(invisible(FALSE))
+  
+  install.packages(missing, dependencies = TRUE)
+  
+  stop(
+    paste0(
+      "Installed missing packages: ",
+      paste(missing, collapse = ", "),
+      "\nPlease restart R and run the script again."
+    ),
+    call. = FALSE
   )
 }
 
-old_pkgs <- old.packages()
-
-if (!is.null(old_pkgs)) {
-  to_update <- intersect(required_packages, rownames(old_pkgs))
+check_outdated_packages <- function(version_requirements) {
+  outdated <- names(version_requirements)[
+    !vapply(
+      names(version_requirements),
+      function(pkg) check_installed_version(pkg, version_requirements[[pkg]]),
+      logical(1)
+    )
+  ]
   
-  if (length(to_update) > 0) {
-    suppressWarnings(
-      suppressMessages(
-        install.packages(to_update, dependencies = TRUE, quiet = TRUE)
-      )
+  if (length(outdated) > 0) {
+    stop(
+      paste0(
+        "These packages are too old and must be updated in a fresh R session: ",
+        paste(outdated, collapse = ", "),
+        "\nRun:\n",
+        "install.packages(c(",
+        paste(sprintf('"%s"', outdated), collapse = ", "),
+        "), dependencies = TRUE)\n",
+        "Then restart R and run the script again."
+      ),
+      call. = FALSE
     )
   }
+  
+  invisible(TRUE)
 }
 
-invisible(lapply(required_packages, function(pkg) {
-  suppressPackageStartupMessages(library(pkg, character.only = TRUE))
-}))
+load_required_packages <- function(pkgs) {
+  for (pkg in pkgs) {
+    suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+  }
+  invisible(TRUE)
+}
 
 check_for_script_update <- function(current_version) {
-  api_url <- "https://api.github.com/repos/ram-24-mp/Pb210Modeler/releases/latest"
-  
   latest_version <- tryCatch({
-    x <- jsonlite::fromJSON(api_url)
+    x <- jsonlite::fromJSON(
+      "https://api.github.com/repos/ram-24-mp/Pb210Modeler/releases/latest"
+    )
     sub("^v", "", trimws(x$tag_name))
   }, error = function(e) NA_character_)
   
@@ -71,8 +148,30 @@ check_for_script_update <- function(current_version) {
   invisible(FALSE)
 }
 
-check_for_script_update(script_version)
+check_r_version_current()
 
+if ("rlang" %in% loadedNamespaces()) {
+  loaded_rlang <- as.character(getNamespaceVersion("rlang"))
+  if (utils::compareVersion(loaded_rlang, min_versions[["rlang"]]) < 0) {
+    stop(
+      paste0(
+        "An outdated 'rlang' namespace is already loaded in this R session (",
+        loaded_rlang,
+        ").\n",
+        "Restart R before running this script.\n",
+        "Do not source this script again in the same session after updating packages.\n",
+        "Run install.packages(c(\"rlang\", \"vctrs\", \"ggplot2\", \"dplyr\"), dependencies = TRUE)"
+      ),
+      call. = FALSE
+    )
+  }
+}
+
+install_missing_packages(required_packages)
+check_outdated_packages(min_versions)
+load_required_packages(required_packages)
+check_for_script_update(script_version)
+# clean workspace
 rm(list = ls(all.names = TRUE))
 
 # some useful functions for handling plots dynamically
