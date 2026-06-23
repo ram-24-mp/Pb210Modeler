@@ -12,10 +12,10 @@ Any missing dry bulk density and supported Pb-210 activities are calculated via 
 
 Pb210Modeler performs automatic background determination for Alpha data and optional user-guided background determination. Background activity is calculated as a weighted mean and uncertainty is calculated as the standard error of the mean via REML modeling with a KNA test using the metafor package. The user may instead opt to use a simple arithmetic mean and standard error for background activity as well. 
 
-Also included are automatic and user-guided surface active zone (SAZ) determination, automatic CFCS model fitting with the segmented package, and optional manual CFCS model fitting. Initial activity C(0) and initial dry bulk density DBD(0) at the surface are extrapolated by the best-fit linear models (as determined by adjusted R-square) calculated from points 1-3 through 1-10. Data tables (.csv) and accompanying plots (.pdf) are saved to model-specific folders. After performing age-depth modeling, Pb210Modeler includes an option for calculating the accumulation rates of other materials within the core, either as a weight fraction (g/g, i.e. carbon, PFAS, etc.) or as a particle concentration (p/g, microplastic, fly ash, etc.).
+Also included are automatic and user-guided surface active zone (SAZ) determination, automatic CFCS model fitting with the segmented package, and optional manual CFCS model fitting. Initial activity C(0) and initial dry bulk density DBD(0) at the surface are extrapolated by the best-fit linear models (as determined by adjusted R-square) calculated from points 1-3 through 1-10. Data tables (.xlsx) and accompanying plots (.pdf) are saved to model-specific folders. After performing age-depth modeling, Pb210Modeler includes an option for calculating the accumulation rates of other materials within the core, either as a weight fraction (g/g, i.e. carbon, PFAS, etc.) or as a particle concentration (p/g, microplastic, fly ash, etc.).
 
 Pb210Modeler checks for model assumption violations due to a SAZ, missing inventory, age inversions, or negative SARs, and calculates Pb-210 atmospheric flux to aid CF model validation.
 
-Required libraries include readxl, writexl, ggplot2, scales, segmented, dplyr, zoo, metafor, and rstudioapi.
+Required libraries include jsonlite, readxl, writexl, ggplot2, scales, segmented, dplyr, zoo, metafor, and rstudioapi.
 
 [Example data](https://app.geosamples.org/sample/igsn/10.58052/IEJDH0002) included here were kindly provided by [Josh Himmelstein](https://github.com/joshimmel).
