@@ -2530,14 +2530,42 @@ dev.off()
 write_xlsx(as.data.frame(CF_CFCS_table), "CF_CFCS model comparisons/CF_CFCS_table.xlsx")
 }
 #completion dialogue for CF
+
+# Zhang atm flux section
+est_local_flux=readline(prompt = "Do you want to estimate local atmospheric flux of Pb-210? (True or False) ")
+if (est_local_flux==TRUE){
+  flux_table <- data.frame(
+    `Lower Latitudinal Bound` = c(70, 60, 50, 40, 30, 20, 10, 0, -20, -30, -40, -50, -70, -80, -90),
+    `Upper Latitudinal Bound` = c(80, 70, 60, 50, 40, 30, 20, 10, -10, -20, -30, -40, -60, -70, -80),
+    `Equation Coefficient` = c(0.04, 0.10, 0.03, 0.06, 0.13, 0.25, 0.09, -0.03, 0.06, 0.01, 0.11, 0.06, 0.01, 0.02, 0.02),
+    `Equation y Intercept` = c(0.07, -16.1, 74.9, 117.5, 71.8, -124.6, -6.4, 239.9, -2.2, 56.5, -31.3, -3.5, 1.7, 0.2, 0.5),
+    `Pearson r square` = c(0.84, 0.76, 0.25, 0.25, 0.39, 0.59, 0.94, 0.29, 0.66, 0.15, 0.65, 0.80, 0.77, 0.86, 0.92)
+  )
+  lat_band=as.numeric(readline(prompt = "Enter core latitude (indicate southern latitude with -) "))
+  precip_mm=as.numeric(readline(prompt = "Enter local annual precipitation (mm) "))
+  for (i in 1:15){
+    if (lat_band>= flux_table[i,1] & lat_band<=flux_table[i,2]){
+      flux_est=flux_table[i,3]*precip_mm+flux_table[i,4]
+      flux_est=(flux_est*60)/10000
+      cat("Local atmospheric Pb-210 flux is ", flux_est, " dpm/(cm^2 y)\n")
+      insert_results=c(flux_est,flux_table[i,5])
+    }
+  }
+  if ((lat_band<0 & lat_band>-10) | (lat_band<-50 & lat_band>-60) ){
+    print("no local atmospheric Pb-210 flux estimate available")
+    insert_results=c(NA,NA)
+  }
+}
 finish_CF=FALSE
 print("atmospheric Pb-210 flux (dpm cm^2/yr)")
 atm_flux=as.numeric(CF_table[1,5]*decay_const)
 atm_flux_uncer=atm_flux*sqrt((as.numeric(CF_table[1,6])/as.numeric(CF_table[1,5]))^2+(decay_const_uncer/decay_const)^2)
 print(atm_flux)
-flux_table=array(data=NA, dim=c(1,2), dimnames=list(NULL, c("Atmospheric Pb-210 Flux (dpm cm^2/yr)", "Atmospheric Pb-210 Flux Uncertainty (dpm cm^2/yr)")))
+flux_table=array(data=NA, dim=c(1,4), dimnames=list(NULL, c("Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))","Estimated Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Estimate Pearson's r square")))
 flux_table[1,1]=atm_flux
 flux_table[1,2]=atm_flux_uncer
+flux_table[1,3]=insert_results[1]
+flux_table[1,4]=insert_results[2]
 flux_table_path <- file.path(folder_name3, "atm_pb210_flux.xlsx")
 write_xlsx(as.data.frame(flux_table), flux_table_path)
 
