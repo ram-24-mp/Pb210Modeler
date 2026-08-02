@@ -2207,7 +2207,7 @@ for (i in 1:(nrow(CF_table) - 2)) {
 # MAR uncertainty
 for (i in 1:(nrow(CF_table)-2)){
   if (i %% 2 ==1){
-    CF_table[i,11]=CF_table[i,10]*sqrt(((decay_const_uncer/decay_const)^2)+((CF_table[i,6]/CF_table[i,5])^2)+((concentrations_table[i,9]/concentrations_table[i,8])^2))
+    CF_table[i,11]=CF_table[i,10]*sqrt((CF_table[i,6]/CF_table[i,5])^2+(1-((CF_table[i,5]-CF_table[(i+2),5])/CF_table[i,5]))*(concentrations_table[i,9]/concentrations_table[i,8])^2)
   }
 }
 # DBD layer loop
@@ -2532,7 +2532,10 @@ write_xlsx(as.data.frame(CF_CFCS_table), "CF_CFCS model comparisons/CF_CFCS_tabl
 #completion dialogue for CF
 
 # Zhang atm flux section
-est_local_flux=readline(prompt = "Do you want to estimate local atmospheric flux of Pb-210? (True or False) ")
+insert_results=c(NA,NA)
+est_local_flux <- as.logical(readline(
+  prompt = "Do you want to to estimate local atmospheric flux? (TRUE/FALSE): "
+))
 if (est_local_flux==TRUE){
   flux_table <- data.frame(
     `Lower Latitudinal Bound` = c(70, 60, 50, 40, 30, 20, 10, 0, -20, -30, -40, -50, -70, -80, -90),
@@ -2547,17 +2550,19 @@ if (est_local_flux==TRUE){
     if (lat_band>= flux_table[i,1] & lat_band<=flux_table[i,2]){
       flux_est=flux_table[i,3]*precip_mm+flux_table[i,4]
       flux_est=(flux_est*60)/10000
-      cat("Local atmospheric Pb-210 flux is ", flux_est, " dpm/(cm^2 y)\n")
+      cat("Local curve estimate atmospheric Pb-210 flux is ", flux_est, " dpm/(cm^2 y)\n")
       insert_results=c(flux_est,flux_table[i,5])
+      break
     }
   }
-  if ((lat_band<0 & lat_band>-10) | (lat_band<-50 & lat_band>-60) ){
-    print("no local atmospheric Pb-210 flux estimate available")
+  if ((lat_band < 0 & lat_band > -10) |
+      (lat_band < -50 & lat_band > -60)) {
+    print("no local curve for atmospheric Pb-210 flux estimate available")
     insert_results=c(NA,NA)
   }
 }
 finish_CF=FALSE
-print("atmospheric Pb-210 flux (dpm cm^2/yr)")
+print("core-derived atmospheric Pb-210 flux (dpm cm^2/yr)")
 atm_flux=as.numeric(CF_table[1,5]*decay_const)
 atm_flux_uncer=atm_flux*sqrt((as.numeric(CF_table[1,6])/as.numeric(CF_table[1,5]))^2+(decay_const_uncer/decay_const)^2)
 print(atm_flux)
