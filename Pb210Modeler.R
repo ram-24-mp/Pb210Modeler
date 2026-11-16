@@ -1,12 +1,12 @@
 #For updates and bug fixes, please see the actively maintained version of Pb210Modeler:
 #https://github.com/ram-24-mp/Pb210Modeler
 
-# package startup
+# package start up
 script_version <- "1.2"
 
 required_packages <- c(
   "jsonlite", "readxl", "writexl", "ggplot2",
-  "scales", "segmented", "dplyr", "zoo", "metafor"
+  "scales", "segmented", "dplyr"
 )
 
 min_versions <- c(
@@ -174,68 +174,103 @@ check_for_script_update(script_version)
 # clean workspace
 rm(list = ls(all.names = TRUE))
 
-# some useful functions for handling plots dynamically
-accuracy_finder <- function (column){
-  number_to_check=min_by_lowest_precision(column)
-  true_accuracy=round_to_first_sig_digit(number_to_check)
-  return (true_accuracy)
-}
-round_to_first_sig_digit <- function(x) {
-  if (x == 0) return(0)
-  exponent <- floor(log10(abs(x)))
-  lower <- 10^exponent
-  upper <- 10^(exponent + 1)
-  cutoff <- 5 * lower
-  if (x < cutoff) {
-    return(lower)
-  } else {
-    return(upper)
-  }
-}
-
-min_by_lowest_precision <- function(vec) {
-  # Remove NA
-  vec <- vec[!is.na(vec)]
-  #Function to count digits after decimal
-  count_precision <- function(x) {
-    if (x %% 1 == 0) return(0)
-    nchar(sub("^\\d+\\.", "", sub("0+$", "", as.character(x))))
-  }
-  #Get minimum decimal precision
-  precisions <- sapply(vec, count_precision)
-  min_precision <- min(precisions)
-  #Define a comparison function based on that precision
-  compare_val <- function(x) round(x, digits = min_precision)
-  #Find the value in the original vector with the lowest rounded value
-  rounded_vec <- sapply(vec, compare_val)
-  min_index <- which.min(rounded_vec)
-  #Return the original value at that index
-  vec[min_index]
-}
-
-leading_decimal_zeros <- function(x) {
-  if (x == 0) return(0)
-  # Ensure fixed-point formatting (avoid scientific notation)
-  x_str <- format(abs(x), scientific = FALSE, trim = TRUE)
-  #Get everything after the decimal point
-  decimal_part <- sub("^\\d+\\.", "", x_str)
-  #Find position of first non-zero digit
-  match_pos <- regexpr("[1-9]", decimal_part)
-  return(as.integer(match_pos))  # strip attributes
-}
-breaks_by_value <- function(table, column_name) {
+dynamic_scale <- function(table, column_name, n_breaks = 10,
+                          axis = "x", reverse = FALSE) {
+  
   col_data <- table[[column_name]]
-  range <- max(col_data, na.rm = TRUE) - min(col_data, na.rm = TRUE)
-  step_size <- range / 10
-  rounded <- round(step_size, digits = leading_decimal_zeros(step_size))
-  return(rounded)
+  
+  # Remove NA / non-finite values
+  col_data <- col_data[is.finite(col_data)]
+  
+  # Handle empty or invalid data
+  if (length(col_data) == 0) {
+    stop("No finite values found in column: ", column_name)
+  }
+  
+  # Determine the range
+  data_range <- range(col_data)
+  
+  # Generate "nice" breaks
+  brks <- scales::breaks_pretty(n = n_breaks)(data_range)
+  
+  # Remove duplicate/non-increasing breaks
+  brks <- brks[is.finite(brks)]
+  brks <- unique(brks)
+  
+  if (length(brks) < 2) {
+    brks <- data_range
+  }
+  
+  # Determine spacing between breaks
+  diffs <- diff(brks)
+  diffs <- diffs[diffs > 0]
+  
+  if (length(diffs) == 0) {
+    accuracy <- 1
+  } else {
+    step <- min(diffs)
+    accuracy <- 10^floor(log10(step))
+  }
+  
+  # Return base-R breaks if requested
+  if (axis == "base") {
+    if (reverse) {
+      brks <- rev(brks)
+    }
+    
+    return(list(
+      breaks = brks,
+      accuracy = accuracy
+    ))
+  }
+  
+  # Return ggplot scale
+  if (axis == "x") {
+    return(
+      ggplot2::scale_x_continuous(
+        breaks = brks,
+        labels = scales::label_number(accuracy = accuracy),
+        trans = if (reverse) "reverse" else "identity"
+      )
+    )
+  }
+  
+  if (axis == "y") {
+    return(
+      ggplot2::scale_y_continuous(
+        breaks = brks,
+        labels = scales::label_number(accuracy = accuracy),
+        trans = if (reverse) "reverse" else "identity"
+      )
+    )
+  }
+  
+  stop("axis must be 'x', 'y', or 'base'")
+}
+
+decimal_year <- function(date) {
+  
+  year_start <- as.Date(paste0(format(date, "%Y"), "-01-01"))
+  
+  next_year_start <- as.Date(paste0(
+    as.integer(format(date, "%Y")) + 1, "-01-01"
+  ))
+  
+  as.numeric(format(date, "%Y")) +
+    as.numeric(date - year_start) /
+    as.numeric(next_year_start - year_start)
 }
 
 # make a numeric date
 day=as.numeric(readline(prompt = "Enter Day "))
 month=as.numeric(readline(prompt = "Enter Month "))
 year=as.numeric(readline(prompt = "Enter Year "))
-numeric_date=year+(month-1)/12+(day-1)/365.24
+
+# Construct actual calendar date
+collection_date = as.Date(
+  sprintf("%04d-%02d-%02d", year, month, day)
+)
+numeric_date=decimal_year(collection_date)
 
 interval_constant=readline(prompt = "Is your interval thickness constant (True or False) ")
 # core dimensions, in cm
@@ -262,6 +297,8 @@ half_life= 22.23
 half_life_uncer=0.12
 decay_const=log(2)/half_life
 decay_const_uncer= decay_const*(0.12/22.23*100)/100
+# DDEP year convention
+days_per_year <- 365.242198
 
 # masses
 # dry bulk density g cm^-3 & corresponding uncertainty columns are provided by user. Data must be entered with empty row between each entry
@@ -313,7 +350,8 @@ for (i in 1:nrow(mass_table)){
   half_life_uncer=0.12
   decay_const=log(2)/half_life
   decay_const_uncer= decay_const*(0.12/22.23*100)/100
-  
+  # DDEP year convention
+  days_per_year <- 365.242198
   
   
   
@@ -335,7 +373,7 @@ for (i in 1:nrow(mass_table)){
   # Total rows: one for mid-depth, one for boundaries, aligned in depth order
   mass_table_rows <- 2 * n_intervals+1
   
-  mass_table=array(data=NA, dim=c(mass_table_rows, 11), dimnames=list(NULL, c("Top of Interval z(i) (cm)", "Mid Depth zi (cm)","Interval Thickness delta zi (cm)","Dry Bulk Density DBD gcm^-3","Dry Bulk Density Uncertainty u(DBD) gcm^-3","Aerial Dry Mass delta mi/S gcm^-2","Aerial Dry Mass Uncertainty u(delta mi/S) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2")))
+  mass_table=array(data=NA, dim=c(mass_table_rows, 11), dimnames=list(NULL, c("Top of Interval z(i) cm", "Mid Depth zi cm","Interval Thickness delta zi cm","Dry Bulk Density DBD gcm^-3","Dry Bulk Density Uncertainty u(DBD) gcm^-3","Aerial Dry Mass delta mi/S gcm^-2","Aerial Dry Mass Uncertainty u(delta mi/S) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2")))
   colnames(mass_table) <- gsub("delta", "\u0394", colnames(mass_table))
   # 1) Build boundary depths
   boundary_depths <- numeric(0)
@@ -370,92 +408,75 @@ for (i in 1:nrow(mass_table)){
     mass_table[i,3]=mass_table[(i+1),1]-mass_table[(i-1),1]
   }
 }
-  
+
 #load in mass information
 # Define the path to your Excel file
 print("select mass data")
 file_path=file.choose()
-# Specify the new column names
-new_column_names_mass_data <- c("X", "X.1")
 # Read the Excel file
 mass_data <- read_excel(file_path, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
 mass_data=as.data.frame(mass_data)
-colnames(mass_data)=new_column_names_mass_data
 
-# Perform linear interpolation on the X values
-mass_data$interpolated_X <- na.approx(mass_data$X, na.rm = FALSE)
+for (i in 1:nrow(mass_table)){
+  if (i %% 2 == 0){
+    mass_table[i,4]=mass_data[(i/2),1]
+    mass_table[i,5]=mass_data[(i/2),2]
+  }
+}
 
-# Initialize a vector for propagated uncertainties
-mass_data$propagated_uncertainties <- NA
+original_section_DBD <- !is.na(
+  mass_table[, "Dry Bulk Density DBD gcm^-3"]
+)
 
-# Loop through the interpolated X to calculate uncertainties
-for (i in 1:nrow(mass_data)) {
-  # Only calculate propagated uncertainty if the current uncertainty is NA
-  if (is.na(mass_data$X.1[i])) {
-    # Find the nearest known X on both sides
-    left_index <- i - 1
-    while (left_index > 0 && (is.na(mass_data$X[left_index]) || is.na(mass_data$X.1[left_index]))) {
-      left_index <- left_index - 1
-    }
-    
-    right_index <- i + 1
-    while (right_index < nrow(mass_data) && (is.na(mass_data$X[right_index]) || is.na(mass_data$X.1[right_index]))) {
-      right_index <- right_index + 1
-    }
-    
-    # Check if we found valid indices
-    if (left_index > 0 && right_index < nrow(mass_data)) {
-      delta_y1 <- mass_data$X.1[left_index]  # Use the correct column for uncertainties
-      x1 <- left_index
-      delta_y2 <- mass_data$X.1[right_index]  # Use the correct column for uncertainties
-      x2 <- right_index
-      partial_der=(i-x1)/(x2-x1)
+original_section_DBD_evens=rep(NA,10)
+for (i in 1:10){
+  original_section_DBD_evens[i]=original_section_DBD[i*2]
+}
+
+# Preserve original measured values and uncertainties
+original_DBD <- mass_table[, "Dry Bulk Density DBD gcm^-3"]
+original_uDBD <- mass_table[, "Dry Bulk Density Uncertainty u(DBD) gcm^-3"]
+
+# Now interpolate any missing values
+for (i in 1:nrow(mass_table)){
+  if (i %% 2 == 0){
+    if (is.na(original_DBD[i])){
       
-      # Calculate propagated uncertainty
-      propagated_uncertainty <- sqrt(((1-partial_der)*delta_y1)^2 + (partial_der * delta_y2)^2)
-      mass_data$propagated_uncertainties[i] <- propagated_uncertainty
+      # Find the previous section with an original concentration value
+      j = i - 2
+      while (j >= 2 && is.na(original_DBD[j])){
+        j = j - 2
+      }
+      
+      # Find the next section with an original DBD value
+      k = i + 2
+      while (k <= nrow(mass_table) && is.na(original_DBD[k])){
+        k = k + 2
+      }
+      
+      # Interpolate only if there is an original valid section on both sides
+      if (j >= 2 && k <= nrow(mass_table)){
+        
+        fraction =
+          (mass_table[i,"Mid Depth zi cm"] -
+             mass_table[j,"Mid Depth zi cm"]) /
+          (mass_table[k,"Mid Depth zi cm"] -
+             mass_table[j,"Mid Depth zi cm"])
+        
+        mass_table[i,"Dry Bulk Density DBD gcm^-3"] =
+          original_DBD[j] +
+          (original_DBD[k] - original_DBD[j]) * fraction
+        
+        mass_table[i,"Dry Bulk Density Uncertainty u(DBD) gcm^-3"] =
+          sqrt((1-fraction)^2 * original_uDBD[j]^2 +
+                 fraction^2 * original_uDBD[k]^2)
+      }
     }
   }
 }
-mass_data[,1]=mass_data[,3]
-mass_data$X.1[is.na(mass_data$X.1)] <- mass_data$propagated_uncertainties[is.na(mass_data$X.1)]
-mass_data=mass_data[,1:2]
-# Initialize a new dataframe to store the result
-num_rows_md <- nrow(mass_data)
-new_mass_data <- data.frame(matrix(NA, nrow = num_rows_md * 2, ncol = ncol(mass_data)))
-colnames(new_mass_data) <- colnames(mass_data)
-
-# Fill the new dataframe with data and empty rows
-for (i in 1:num_rows_md) {
-  new_mass_data[(i * 2 - 1), ] <- mass_data[i, ]  # Fill the data row
-  # The even rows (i * 2) will remain NA by default
-}
-
-# Remove the last row if it is NA
-if (all(is.na(new_mass_data[nrow(new_mass_data), ]))) {
-  new_mass_data <- new_mass_data[-nrow(new_mass_data), ]
-}
-
-# Set the row names to run from 1 to the length of the data
-rownames(new_mass_data) <- 1:nrow(new_mass_data)
-
-# Assign the new dataframe back to mass_data
-mass_data <- new_mass_data
-# Insert an NA row at the beginning if the first element is not NA
-if (!is.na(mass_data[1, 1])) {
-  empty_row <- data.frame(X = NA, X.1 = NA)  # Create a new data frame row
-  mass_data <- rbind(empty_row, mass_data)  # Bind the new row to the top
-}
-# Reset row names to ensure they are sequential
-rownames(mass_data) <- 1:nrow(mass_data)
-mass_data=as.matrix(mass_data)
-
-mass_table[1:(nrow(mass_table)-1),4]=mass_data[,1]
-mass_table[1:(nrow(mass_table)-1),5]=mass_data[,2]
-
 # aerial mass calculations
 mass_table[,6]=mass_table[,3]*mass_table[,4]
-mass_table[,7]=mass_table[,5]*mass_table[,3] #did it break?
+mass_table[,7]=mass_table[,5]*mass_table[,3]
 # cumulative mass depth
 for (i in 1:nrow(mass_table)){
   if (i==1){
@@ -479,134 +500,53 @@ for (i in 1:nrow(mass_table)){
 # mass depth section 
 for (i in 1:nrow(mass_table)-1){
   if (i %% 2 == 0) {
-    mass_table[i,10]=(mass_table[i-1,8]+mass_table[i+1,8])/2
+    mass_table[i,10]=mass_table[i,6]*0.5+mass_table[(i-1),8]
   }
 }
 # mass depth section uncertainty 
 for (i in 1:nrow(mass_table)-1){
   if (i %% 2 == 0) {
-    mass_table[i,11]= sqrt(sum(mass_table[i+1,9]^2, mass_table[i-1,9]^2))/2
+    mass_table[i,11]= sqrt(mass_table[(i-1),9]^2+(0.5*mass_table[i,7])^2)
   }
 }
 # create the concentrations table and begin preliminary population
-concentrations_table=array(data=NA, dim=c((nrow(mass_table)-1), 14), dimnames=list(NULL, c("Mid Depth zi cm","Total Pb-210 dmp/g","Total Pb-210 Uncertainty u(Pb-210) dmp/g","Supported Pb-210 dmp/g","Supported Pb-210 Uncertainty u(sPb-210) dmp/g","Excess Pb-210 Ci dmp/g","Excess Pb-210 Uncertainty u(Ci) dmp/g","Excess Pb-210 C(i) dmp/g","Excess Pb-210 Uncertainty u(C(i)) dmp/g","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Mass Depth mi g/cm^2","ln(Ci)","u(ln(Ci))"))) #did it break?
+concentrations_table=array(data=NA, dim=c((nrow(mass_table)-1), 15), dimnames=list(NULL, c("Mid Depth zi cm","Total Pb-210 dpm/g","Total Pb-210 Uncertainty u(Pb-210) dpm/g","Supported Pb-210 dpm/g","Supported Pb-210 Uncertainty u(sPb-210) dpm/g","Excess Pb-210 Ci dpm/g","Excess Pb-210 Uncertainty u(Ci) dpm/g","Excess Pb-210 C(i) dpm/g","Excess Pb-210 Uncertainty u(C(i)) dpm/g","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Mass Depth mi g/cm^2","ln(Ci)","u(ln(Ci))","Cumulative Mass Depth Layer m(i) gcm^-2")))
 colnames(concentrations_table) <- gsub("delta", "\u0394", colnames(concentrations_table))
 concentrations_table[,1]=mass_table[1:nrow(concentrations_table),2]
 concentrations_table[,12]=mass_table[1:nrow(concentrations_table),10]
+concentrations_table[,15]=mass_table[1:nrow(concentrations_table),8]
 # load in Pb-210 data, assign Alpha or Gamma methods, and fill activity data
 alpha_or_gamma=readline(prompt = "Do you wish to enter Alpha data (True or False) ")
 if (alpha_or_gamma==TRUE){
   print("select Alpha data")
-  new_column_names_pb210_data <- c("X", "X.1", "X.2", "X.3")
-  # Read the Excel file
   file_path2=file.choose()
   pb210_data <- read_excel(file_path2, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
-  if (ncol(pb210_data)==2){
-    new_column_names_pb210_data=new_column_names_pb210_data[1:2]
-  }
-  colnames(pb210_data) <- new_column_names_pb210_data
   pb210_data=as.data.frame(pb210_data)
-  # Bn=A*(C/A)^(n/N) exponential interpolation of activities
-  for (i in 1:nrow(pb210_data)) {
-    # Check if the current uncertainty is missing
-    if (is.na(pb210_data[i, 2])) {
-      # Get the first activity from the previous row
-      first_activity_tot=pb210_data[(i-1),1]
-      first_uncer_tot=pb210_data[(i-1),2]
-      if (ncol(pb210_data)==4){
-        first_activity_sup=pb210_data[(i-1),3]
-        first_uncer_sup=pb210_data[(i-1),4]
-      }
-      # Initialize a variable to track the end of the missing data
-      j = i
-      # Loop to fill in missing uncertainties
-      length_missing_data=1
-      while (j <= nrow(pb210_data) && is.na(pb210_data[j, 2])) {
-        j = j + 1
-        length_missing_data=length_missing_data+1
-      }
-      length_missing_data=length_missing_data-1
-      segments=length_missing_data+1
-      filler_vec=vector("numeric", length_missing_data)
-      filler_vec_uncer=vector("numeric", length_missing_data)
-      if (ncol(pb210_data)==4){
-        filler_vec2=vector("numeric", length_missing_data)
-        filler_vec_uncer2=vector("numeric", length_missing_data)
-      }
-      # Now j is the first non-missing uncertainty after the missing values
-      if (j <= nrow(pb210_data)) {
-        second_activity_tot = pb210_data[j, 1]
-        second_uncer_tot = pb210_data[j, 2]
-        if (ncol(pb210_data)==4){
-          second_activity_sup=pb210_data[j, 3]
-          second_uncer_sup=pb210_data[j, 4]
-        }
-        # Check if both activities are numeric
-        if (is.numeric(first_activity_tot) && is.numeric(second_activity_tot)) {
-          # Calculate the filled activity
-          for (k in 1:length_missing_data){
-            filler_vec[k]=first_activity_tot*(second_activity_tot/first_activity_tot)^(k/segments)
-            filler_vec_uncer[k]=filler_vec[k]*sqrt(((((segments-k)*(second_activity_tot/first_activity_tot)^(k/segments))/segments)*first_uncer_tot)^2+(((k*(second_activity_tot/first_activity_tot)^((k/segments)-1))/segments)*second_uncer_tot)^2)
-          }
-          # Fill the missing uncertainties
-          pb210_data[i:(j - 1), 1] = filler_vec
-          pb210_data[i:(j - 1), 2] = filler_vec_uncer
-        }
-      }
-      # Move the index to j to continue checking for further missing values
-      i = j - 1
+  for (i in 1:nrow(concentrations_table)){
+    if (i %% 2 == 0){
+      concentrations_table[i,2]=pb210_data[(i/2),1]
+      concentrations_table[i,3]=pb210_data[(i/2),2]
     }
   }
-  # Initialize a new dataframe to store the result
-  num_rows_zi <- nrow(pb210_data)
-  new_pb210_data <- data.frame(matrix(NA, nrow = num_rows_zi * 2, ncol = ncol(pb210_data)))
-  colnames(new_pb210_data) <- colnames(pb210_data)
   
-  # Fill the new dataframe with data and empty rows
-  for (i in 1:num_rows_zi) {
-    new_pb210_data[(i * 2 - 1), ] <- pb210_data[i, ]  # Fill the data row
-    # The even rows (i * 2) will remain NA by default
-  }
-  
-  # Remove the last row if it is NA
-  if (all(is.na(new_pb210_data[nrow(new_pb210_data), ]))) {
-    new_pb210_data <- new_pb210_data[-nrow(new_pb210_data), ]
-  }
-  
-  # Set the row names to run from 1 to the length of the data
-  rownames(new_pb210_data) <- 1:nrow(new_pb210_data)
-  
-  # Assign the new dataframe back to pb210_data
-  pb210_data <- new_pb210_data
-  # Insert an NA row at the beginning if the first element is not NA
-  if (!is.na(pb210_data[1, 1])) {
-    if (ncol(pb210_data)==2){
-      empty_row <- data.frame(X = NA, X.1 = NA)  # Create a new data frame row
-      pb210_data <- rbind(empty_row, pb210_data)  # Bind the new row to the top 
-    }else{
-      empty_row <- data.frame(X = NA, X.1 = NA, X.2=NA, X.3=NA)  # Create a new data frame row
-      pb210_data <- rbind(empty_row, pb210_data)  # Bind the new row to the top
-    }
-    
-  }
-  # Reset row names to ensure they are sequential
-  rownames(pb210_data) <- 1:nrow(pb210_data)
-  pb210_data=as.matrix(pb210_data)
-  
-  concentrations_table[1:(nrow(concentrations_table)),2]=pb210_data[,1]
-  concentrations_table[1:(nrow(concentrations_table)),3]=pb210_data[,2]
-  if(ncol(pb210_data)==4){
-    concentrations_table[1:(nrow(concentrations_table)),4]=pb210_data[,3]
-    concentrations_table[1:(nrow(concentrations_table)),5]=pb210_data[,4]
-  }
   
   accept_background_determination=FALSE
   
   #start of background auto detection
-  pb210_data_auto_bkrng=na.omit(pb210_data)
+  background_table=matrix(nrow=nrow(pb210_data), ncol=3)
+  background_table=as.data.frame(background_table)
+  pb210_data_auto_bkrnd=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("y","x", "x_uncertainty")))
+  for (i in 1:nrow(concentrations_table)){
+    if (i%%2==0){
+      background_table[i/2,1]=concentrations_table[i,1]
+      background_table[i/2,2]=concentrations_table[i,2]
+      background_table[i/2,3]=concentrations_table[i,3]
+    }
+  }
+  
+  pb210_data_auto_bkrng=pb210_data
   pb210_data_auto_bkrng=as.data.frame(pb210_data_auto_bkrng)
-  pb210_data_auto_bkrng$X.2=log(pb210_data_auto_bkrng[,1])
-  pb210_data_auto_bkrng$X.3=na.omit(concentrations_table[,1])
+  pb210_data_auto_bkrng$X.2=na.omit(concentrations_table[,1])
   pb210_data_auto_bkrng=as.data.frame(pb210_data_auto_bkrng)
   
   #perform analysis
@@ -726,40 +666,19 @@ if (alpha_or_gamma==TRUE){
   
   # Use with your columns (y = dpm/g, x = cm)
   y <- pb210_data_auto_bkrng[, 1]
-  x <- pb210_data_auto_bkrng[, 4]
+  x <- pb210_data_auto_bkrng[, 3]
   res <- detect_pb210_background(x, y, hmin = 3)
   res$present
   res$idx
   res$x_at_start
   res$slope_bot
   if (res$present==TRUE) {
-    suggested_background_index <- rownames(pb210_data_auto_bkrng)[ res$idx ]
+    suggested_background_index <- 2*res$idx
     cat("Suggested background activity begins at index:", suggested_background_index, "\n")
-    # REML start
-    y_REML   <- na.omit(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1])
-    sei_REML <- na.omit(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 2])
-    
-    ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
-    y_REML   <- y_REML[ok_REML]
-    sei_REML <- sei_REML[ok_REML]
-    n_REML   <- length(y_REML)
-    
-    fit_REML <- rma.uni(yi = y_REML, sei = sei_REML, method = "REML", test = "knha")
-    
-    mu_hat <- as.numeric(fit_REML$b)
-    se_mu  <- as.numeric(fit_REML$se)
-    tau2   <- as.numeric(fit_REML$tau2)
-    tau    <- sqrt(tau2)
-    #REML end
-    print("REML Results (Weighted Mean and Standard Error)")
-    print("Background activity (dmp/g)")
-    print(mu_hat)
-    print("Background activity uncertainty (dmp/g)")
-    print(se_mu)
-    print("Arthmetic Mean & Standard Error Reference Values")
-    print("Pb-210 Background Activity (dmp/g)")
+    print("Arithmetic Mean & Standard Error")
+    print("Pb-210 Background Activity (dpm/g)")
     print(mean(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1]))
-    print("Pb-210 Background Activity Uncertainty (dmp/g)")
+    print("Pb-210 Background Activity Uncertainty (dpm/g)")
     length_finder_1=length(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1])
     print(sd(pb210_data_auto_bkrng[res$idx:length(pb210_data_auto_bkrng[,1]), 1])/sqrt(length_finder_1))
   } else {
@@ -787,20 +706,49 @@ if (alpha_or_gamma==TRUE){
     # Print the data frame
     print(df)
     background_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y", "x_uncertainty")))
-    background_table[,1]=na.omit(concentrations_table[,2])
-    background_table[,2]=na.omit(concentrations_table[,1])
-    background_table[,3]=na.omit(concentrations_table[,3])
+    for (i in 1:nrow(concentrations_table)){
+      if (i%%2==0){
+        background_table[i/2,1]=concentrations_table[i,2]
+        background_table[i/2,2]=concentrations_table[i,1]
+        background_table[i/2,3]=concentrations_table[i,3]
+      }
+    }
+    
     background_table=as.data.frame(background_table)
-    background_table_plot=ggplot(background_table, aes(x = x, y = y)) +
-      geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +
-      geom_point() +  # Add points
-      labs(title = "Total Pb-210 vs Mid Depth", x = "Total Pb-210 (dmp/g)", y ="Mid Depth (cm)") +  # Add labels
-      scale_x_continuous(breaks = seq(min(background_table$x), max(background_table$x), by = breaks_by_value(background_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(background_table[,3]))) +  # Set x-axis dynamically
-      scale_y_reverse(breaks = seq(min(background_table$y), max(background_table$y), by = 4)) +  # Set y-axis dynamically
-      theme_minimal()  # Use a minimal theme
+    background_table_plot <- ggplot(
+      background_table,
+      aes(x = x, y = y)
+    ) +
+      geom_errorbar(
+        aes(
+          xmin = x - x_uncertainty,
+          xmax = x + x_uncertainty
+        ),
+        width = 0.2
+      ) +
+      geom_point() +
+      labs(
+        title = "Total Pb-210 vs Mid Depth",
+        x = "Total Pb-210 (dpm/g)",
+        y = "Mid Depth (cm)"
+      ) +
+      dynamic_scale(
+        background_table,
+        "x"
+      ) +
+      dynamic_scale(
+        background_table,
+        "y",
+        axis = "y",
+        reverse = TRUE
+      ) +
+      theme_minimal()
+    
     print(background_table_plot)
     
-    hit_background=readline(prompt = "Was equilibrium depth achieved? (True or False) ")
+    hit_background <- tolower(readline(
+      prompt = "Was equilibrium depth achieved? (True or False) "
+    )) == "true"
     
     if (hit_background==TRUE){
     first_background=as.numeric(readline(prompt = "At what index does background begin? "))
@@ -808,43 +756,12 @@ if (alpha_or_gamma==TRUE){
     check_for_negs=which((concentrations_table[1:(first_background-1),2]-background_value)<0)[1]
     check_background_length=length(concentrations_table[first_background:nrow(concentrations_table)])
     test_length_finder=length(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
-    # REML option insert
-    y_REML   <- na.omit(concentrations_table[first_background:nrow(concentrations_table),2])
-    sei_REML <- na.omit(concentrations_table[first_background:nrow(concentrations_table),3])
-    
-    ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
-    y_REML   <- y_REML[ok_REML]
-    sei_REML <- sei_REML[ok_REML]
-    n_REML   <- length(y_REML)
-    
-    fit_REML <- rma.uni(yi = y_REML, sei = sei_REML, method = "REML", test = "knha")
-    
-    mu_hat <- as.numeric(fit_REML$b)
-    se_mu  <- as.numeric(fit_REML$se)
-    tau2   <- as.numeric(fit_REML$tau2)
-    tau    <- sqrt(tau2)
-    # REML done
+
     if (is.na(check_for_negs)==FALSE){
       accept_new_background=FALSE
       while(accept_new_background==FALSE){
         cat(sprintf("poor background selection detected! negative excess Pb-210 activity at index: %f\n",check_for_negs))
         accept_new_background=readline(prompt = "Accept new background determination from this index? (True) ")
-        #insert REML again
-        y_REML   <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2])
-        sei_REML <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),3])
-        
-        ok_REML <- is.finite(y_REML) & is.finite(sei_REML) & sei_REML > 0
-        y_REML   <- y_REML[ok_REML]
-        sei_REML <- sei_REML[ok_REML]
-        n_REML   <- length(y_REML)
-        
-        fit_REML <- rma.uni(yi = y_REML, sei = sei_REML, method = "REML", test = "knha")
-        
-        mu_hat <- as.numeric(fit_REML$b)
-        se_mu  <- as.numeric(fit_REML$se)
-        tau2   <- as.numeric(fit_REML$tau2)
-        tau    <- sqrt(tau2)
-        #done
         background_value=mean(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))
         background_value_uncer=sd(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))/sqrt(test_length_finder)
         first_background=check_for_negs
@@ -857,17 +774,11 @@ if (alpha_or_gamma==TRUE){
       print("Background selection does not contain enough points! Make a new selection")
       accept_background_determination=FALSE
     }else{
-    print("REML Results (Weighted Mean and Standard Error)")
-    print("Background activity (dmp/g)")
-    print(mu_hat)
-    print("Background activity uncertainty (dmp/g)")
-    print(se_mu)
-    print("Arthmetic Mean & Standard Error Reference Values")
-    print("Background activity (dmp/g)")
+    print("Arithmetic Mean & Standard Error")
+    print("Background activity (dpm/g)")
     print(background_value)
-    print("Background activity uncertainty (dmp/g)")
+    print("Background activity uncertainty (dpm/g)")
     print(background_value_uncer)
-    accept_REML=readline(prompt = "Accept REML results? (True or False) ")
     accept_background_determination=readline(prompt = "Accept background determination? (True or False) ")
     }
     }else{
@@ -876,231 +787,656 @@ if (alpha_or_gamma==TRUE){
   }
   if (hit_background==TRUE){
   for (i in 1:nrow(concentrations_table)){
-    if (i %% 2 == 0) {
-      if (accept_REML==TRUE){
-        concentrations_table[i,4]=mu_hat
-        concentrations_table[i,5]=se_mu
-      }else{
+    if (i %% 2 == 0 && is.na(concentrations_table[i,2])== FALSE) {
       concentrations_table[i,4]=background_value
       concentrations_table[i,5]=background_value_uncer
       }
     }
-  }
+  
   concentrations_table=concentrations_table[1:first_background-1,]
   mass_table=mass_table[1:first_background-1,]
   }else{
+    independent_background=readline(prompt = "Do you have an independent estimate of supported Pb-210 activity? (True or False) ")
+    if (independent_background==TRUE){
+    ind_bkrnd=as.numeric(readline(prompt = "Enter supported activity (dpm/g) "))
+    ind_bkrnd_uncer=as.numeric(readline(prompt = "Enter supported activity uncertainty (dpm/g) "))
     for (i in 1:nrow(concentrations_table)){
-      if (i %% 2 == 0) {
+      if (i %% 2 == 0 && is.na(concentrations_table[i,2])== FALSE) {
+        concentrations_table[i,4]=ind_bkrnd
+        concentrations_table[i,5]=ind_bkrnd_uncer
+      }
+    }
+    }else{
+    for (i in 1:nrow(concentrations_table)){
+      if (i %% 2 == 0 && is.na(concentrations_table[i,2])== FALSE) {
           concentrations_table[i,4]=0
           concentrations_table[i,5]=0
       }
+    }
     }
   }
 } else {
   print("select Gamma data")
   # Define the path to your Excel file
-  new_column_names_pb210_data <- c("X", "X.1", "X.2", "X.3")
-  # Read the Excel file
   file_path2=file.choose()
   pb210_data <- read_excel(file_path2, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
-  colnames(pb210_data) <- new_column_names_pb210_data
   pb210_data=as.data.frame(pb210_data)
-  
-  # Perform linear interpolation on the supported values
-  pb210_data$interpolated_X.2 <- na.approx(pb210_data$X.2, na.rm = FALSE)
-  
-  # Initialize a vector for propagated uncertainties
-  pb210_data$propagated_uncertainties_X.2 <- NA
-  
-  # Loop through the interpolated supported values to calculate uncertainties
-  for (i in 1:nrow(pb210_data)) {
-    # Only calculate propagated uncertainty if the current uncertainty is NA
-    if (is.na(pb210_data$X.3[i])) {
-      # Find the nearest known X on both sides
-      left_index <- i - 1
-      while (left_index > 0 && (is.na(pb210_data$X.2[left_index]) || is.na(pb210_data$X.3[left_index]))) {
-        left_index <- left_index - 1
-      }
-      
-      right_index <- i + 1
-      while (right_index < nrow(pb210_data) && (is.na(pb210_data$X.2[right_index]) || is.na(pb210_data$X.3[right_index]))) {
-        right_index <- right_index + 1
-      }
-      
-      # Check if we found valid indices
-      if (left_index > 0 && right_index < nrow(pb210_data)) {
-        delta_y1 <- pb210_data$X.3[left_index]  # Use the correct column for uncertainties
-        x1 <- left_index
-        delta_y2 <- pb210_data$X.3[right_index]  # Use the correct column for uncertainties
-        x2 <- right_index
-        partial_der=(i-x1)/(x2-x1)
-        
-        # Calculate propagated uncertainty
-        propagated_uncertainty <- sqrt(((1-partial_der)*delta_y1)^2 + (partial_der * delta_y2)^2)
-        pb210_data$propagated_uncertainties_X.2[i] <- propagated_uncertainty
-      }
+  for (i in 1:nrow(concentrations_table)){
+    if (i %% 2 == 0){
+      concentrations_table[i,2]=pb210_data[(i/2),1]
+      concentrations_table[i,3]=pb210_data[(i/2),2]
+      concentrations_table[i,4]=pb210_data[(i/2),3]
+      concentrations_table[i,5]=pb210_data[(i/2),4]
     }
-  }
-  pb210_data[,3]=pb210_data[,5]
-  pb210_data$X.3[is.na(pb210_data$X.3)] <- pb210_data$propagated_uncertainties[is.na(pb210_data$X.3)]
-  pb210_data=pb210_data[,1:4]
-  # Bn=A*(C/A)^(n/N) exponential interpolation of activities
-  for (i in 1:nrow(pb210_data)) {
-    # Check if the current uncertainty is missing
-    if (is.na(pb210_data[i, 2])) {
-      # Get the first activity from the previous row
-      first_activity_tot=pb210_data[(i-1),1]
-      first_uncer_tot=pb210_data[(i-1),2]
-      # Initialize a variable to track the end of the missing data
-      j = i
-      # Loop to fill in missing uncertainties
-      length_missing_data=1
-      while (j <= nrow(pb210_data) && is.na(pb210_data[j, 2])) {
-        j = j + 1
-        length_missing_data=length_missing_data+1
-      }
-      length_missing_data=length_missing_data-1
-      segments=length_missing_data+1
-      filler_vec=vector("numeric", length_missing_data)
-      filler_vec_uncer=vector("numeric", length_missing_data)
-      if (ncol(pb210_data)==4){
-        filler_vec2=vector("numeric", length_missing_data)
-        filler_vec_uncer2=vector("numeric", length_missing_data)
-      }
-      # Now j is the first non-missing uncertainty after the missing values
-      if (j <= nrow(pb210_data)) {
-        second_activity_tot = pb210_data[j, 1]
-        second_uncer_tot = pb210_data[j, 2]
-        # Check if both activities are numeric
-        if (is.numeric(first_activity_tot) && is.numeric(second_activity_tot)) {
-          # Calculate the filled activity
-          for (k in 1:length_missing_data){
-            filler_vec[k]=first_activity_tot*(second_activity_tot/first_activity_tot)^(k/segments)
-            filler_vec_uncer[k]=filler_vec[k]*sqrt(((((segments-k)*(second_activity_tot/first_activity_tot)^(k/segments))/segments)*first_uncer_tot)^2+(((k*(second_activity_tot/first_activity_tot)^((k/segments)-1))/segments)*second_uncer_tot)^2)
-          }
-          # Fill the missing uncertainties
-          pb210_data[i:(j - 1), 1] = filler_vec
-          pb210_data[i:(j - 1), 2] = filler_vec_uncer
-        }
-      }
-      # Move the index to j to continue checking for further missing values
-      i = j - 1
-    }
-  }
-  # Initialize a new dataframe to store the result
-  num_rows_zi <- nrow(pb210_data)
-  new_pb210_data <- data.frame(matrix(NA, nrow = num_rows_zi * 2, ncol = ncol(pb210_data)))
-  colnames(new_pb210_data) <- colnames(pb210_data)
-  
-  # Fill the new dataframe with data and empty rows
-  for (i in 1:num_rows_zi) {
-    new_pb210_data[(i * 2 - 1), ] <- pb210_data[i, ]  # Fill the data row
-    # The even rows (i * 2) will remain NA by default
-  }
-  
-  # Remove the last row if it is NA
-  if (all(is.na(new_pb210_data[nrow(new_pb210_data), ]))) {
-    new_pb210_data <- new_pb210_data[-nrow(new_pb210_data), ]
-  }
-  
-  # Set the row names to run from 1 to the length of the data
-  rownames(new_pb210_data) <- 1:nrow(new_pb210_data)
-  
-  # Assign the new dataframe back to pb210_data
-  pb210_data <- new_pb210_data
-  # Insert an NA row at the beginning if the first element is not NA
-  if (!is.na(pb210_data[1, 1])) {
-    if (ncol(pb210_data)==2){
-      empty_row <- data.frame(X = NA, X.1 = NA)  # Create a new data frame row
-      pb210_data <- rbind(empty_row, pb210_data)  # Bind the new row to the top 
-    }else{
-      empty_row <- data.frame(X = NA, X.1 = NA, X.2=NA, X.3=NA)  # Create a new data frame row
-      pb210_data <- rbind(empty_row, pb210_data)  # Bind the new row to the top
-    }
-    
-  }
-  # Reset row names to ensure they are sequential
-  rownames(pb210_data) <- 1:nrow(pb210_data)
-  pb210_data=as.matrix(pb210_data)
-  
-  concentrations_table[1:(nrow(concentrations_table)),2]=pb210_data[,1]
-  concentrations_table[1:(nrow(concentrations_table)),3]=pb210_data[,2]
-  if(ncol(pb210_data)==4){
-    concentrations_table[1:(nrow(concentrations_table)),4]=pb210_data[,3]
-    concentrations_table[1:(nrow(concentrations_table)),5]=pb210_data[,4]
   }
 }
+
+
+# Preserve which section Ci values were originally measured.
+# These are the only section values that should receive ln(Ci).
+original_section_Ci <- !is.na(concentrations_table[, "Total Pb-210 dpm/g"])
+
+original_section_Ci_evens=rep(NA,10)
+for (i in 1:10){
+  original_section_Ci_evens[i]=original_section_Ci[i*2]
+}
+# Section ln(Ci) and u(ln(Ci)) must remain NA when
+# the section Ci was not originally measured.
+for (i in seq(2, nrow(concentrations_table), by = 2)) {
+  if (!original_section_Ci[i]) {
+    concentrations_table[i, "ln(Ci)"] <- NA_real_
+    concentrations_table[i, "u(ln(Ci))"] <- NA_real_
+  }
+}
+  self_absorb_corr=readline(prompt="Do you wish to correct total Pb-210 Activity for self absorption? (TRUE or FALSE) ")
+  if (self_absorb_corr==TRUE){
+    print("select attenuation coefficient data")
+    self_ab_file_path <- file.choose()
+    
+    attenuation_data <- read_excel(
+      self_ab_file_path,
+      col_names = TRUE,
+      .name_repair = "unique_quiet"
+    )
+    correction_summary <- as.data.frame(matrix(NA, nrow = nrow(attenuation_data) * 2, ncol = ncol(attenuation_data)))
+    
+    colnames(correction_summary) <- colnames(attenuation_data)
+    
+    correction_summary[seq(2, nrow(correction_summary), by = 2), ] <- attenuation_data
+    correction_summary$`Original Total Activity (dpm/g)`=concentrations_table[,2]
+    correction_summary$`Original Total Activity Uncertainty (dpm/g)`=concentrations_table[,3]
+    correction_summary$`Corrected Total Activity (dpm/g)`= correction_summary$`Original Total Activity (dpm/g)`*(1/correction_summary[,1])
+    correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`=correction_summary$`Corrected Total Activity (dpm/g)` * sqrt((correction_summary[,2]/correction_summary[,1])^2+(correction_summary[,4]/correction_summary[,3])^2)
+    concentrations_table[,2] <-
+      correction_summary$`Corrected Total Activity (dpm/g)`
+    
+    concentrations_table[,3] <-
+      correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`
+    
+  }
+
+
 concentrations_table[,6]=concentrations_table[,2]-concentrations_table[,4]
 negative_index=which(concentrations_table[,6]<0)
 if (length(negative_index) > 0) {
-  concentrations_table=concentrations_table[1:(negative_index[1] - 1),]
-  mass_table=mass_table[1:(negative_index[1] - 1),]
+  concentrations_table=concentrations_table[1:(negative_index[1]-1),]
+  mass_table=mass_table[1:(negative_index[1]-1),]
+  original_section_Ci = original_section_Ci[1:nrow(concentrations_table)]
 }
 if (is.na(concentrations_table[nrow(concentrations_table),1])==TRUE){
-  concentrations_table=concentrations_table[1:(nrow(concentrations_table)-1),1:ncol(concentrations_table)]
+  concentrations_table=concentrations_table[1:(nrow(concentrations_table)-1),]
+  original_section_Ci = original_section_Ci[1:nrow(concentrations_table)]
 }
+
 # excess pb-210 uncertainty
 for (i in 1:nrow(concentrations_table)){
   if (i %% 2 == 0) {
     concentrations_table[i,7]=sqrt(sum(concentrations_table[i,3]^2, concentrations_table[i,5]^2))
   }
 }
+
+
+perform_decay_corr=readline(prompt = "Do you want to decay correct excess Pb-210 activity? (TRUE or FALSE) ")
+if (perform_decay_corr==TRUE){
+# ==========================================
+# EXCESS Pb-210 DECAY CORRECTION
+# ==========================================
+
+# Read measurement dates from Excel
+
+print("Select Excel file containing measurement dates")
+
+date_file_path <- file.choose()
+
+date_data <- read_excel(
+  date_file_path,
+  col_names = TRUE,
+  .name_repair = "unique_quiet"
+)
+
+measurement_dates_raw <- date_data[[1]]
+measurement_dates_raw=measurement_dates_raw[1:(nrow(concentrations_table)/2)]
+
+# Convert Excel dates into R Date format
+
+if (inherits(measurement_dates_raw, "Date")) {
+  
+  measurement_dates <- measurement_dates_raw
+  
+} else if (inherits(measurement_dates_raw, "POSIXt")) {
+  
+  measurement_dates <- as.Date(measurement_dates_raw)
+  
+} else if (is.numeric(measurement_dates_raw)) {
+  
+  measurement_dates <- as.Date(
+    measurement_dates_raw,
+    origin = "1899-12-30"
+  )
+  
+} else {
+  
+  measurement_dates <- as.Date(
+    trimws(as.character(measurement_dates_raw)),
+    format = "%m/%d/%Y"
+  )
+}
+
+if (anyNA(measurement_dates)) {
+  stop("One or more measurement dates could not be interpreted.")
+}
+
+# Convert dates to decimal years
+
+measurement_numeric_year <- decimal_year(measurement_dates)
+
+# Check number of dates against number of measured sections
+
+measured_rows <- seq(2, nrow(concentrations_table), by = 2)
+
+if (length(measurement_numeric_year) != length(measured_rows)) {
+  stop("Number of dates does not match number of sample intervals.")
+}
+
+# Calculate elapsed time
+
+elapsed_days = as.numeric(measurement_dates - collection_date)
+
+elapsed_time = elapsed_days / days_per_year
+
+if (any(elapsed_time < 0)) {
+  stop("A measurement date occurs after the reference date.")
+}
+
+# Calculate decay correction factor
+
+decay_factor <- exp(decay_const * elapsed_time)
+
+# Preserve original excess activity and uncertainty
+
+original_excess <- concentrations_table[measured_rows, 6]
+original_excess_uncertainty <- concentrations_table[measured_rows, 7]
+
+# Correct excess Pb-210 activity
+
+concentrations_table[measured_rows, 6] <-
+  original_excess * decay_factor
+
+# Propagate uncertainty, including half-life uncertainty
+
+decay_const_uncer <- decay_const *
+  half_life_uncer / half_life
+
+concentrations_table[measured_rows, 7] <- sqrt(
+  (decay_factor * original_excess_uncertainty)^2 +
+    (concentrations_table[measured_rows, 6] *
+       elapsed_time * decay_const_uncer)^2
+)
+
+# Save date correction information
+
+decay_summary <- data.frame(
+  Measurement_Date = measurement_dates,
+  Measurement_Year = measurement_numeric_year,
+  Reference_Year = numeric_date,
+  Elapsed_Time_Years = elapsed_time,
+  Decay_Factor = decay_factor,
+  Original_Excess = original_excess,
+  Original_Uncertainty = original_excess_uncertainty,
+  Corrected_Excess = concentrations_table[measured_rows, 6],
+  Corrected_Uncertainty = concentrations_table[measured_rows, 7]
+)
+}
+
+
+
+if (is.na(concentrations_table[2,6])){
+# Construct the first 10 interval records
+C1_table <- data.frame(
+  zi = mass_table[seq(2, 20, by = 2), 2],
+  mi = concentrations_table[seq(2, 20, by = 2), 12],
+  ln_Ci = NA_real_
+)
+
+activity <- concentrations_table[
+  seq(2, 20, by = 2),
+  "Excess Pb-210 Ci dpm/g"
+]
+
+# Only take logarithms of finite, positive activities
+valid_activity <- is.finite(activity) & activity > 0
+
+C1_table$ln_Ci[valid_activity] <- log(activity[valid_activity])
+
+# Preserve the original-measurement rule
+for (j in seq_len(nrow(C1_table))) {
+  if (is.na(original_section_Ci_evens[j]) ||
+      !original_section_Ci_evens[j]) {
+    C1_table$ln_Ci[j] <- NA_real_
+  }
+}
+
+C1_model_list <- list()
+model_summaries_surf_tot_activity <- list()
+
+for (extent in 3:10) {
+  
+  candidate <- C1_table[seq_len(extent), ]
+  
+  # Identify valid observations
+  valid <- is.finite(candidate[, "mi"]) &
+    is.finite(candidate[, "ln_Ci"])
+  
+  fit_data <- candidate[valid, , drop = FALSE]
+  
+  # Use the same columns for every candidate model
+  result <- data.frame(
+    Model = paste0("Indices 1-", extent),
+    N = nrow(fit_data),
+    Used_indices = paste(which(valid), collapse = ", "),
+    Intercept = NA_real_,
+    Slope = NA_real_,
+    Intercept_SE = NA_real_,
+    Slope_SE = NA_real_,
+    R.squared = NA_real_,
+    Adj.R.squared = NA_real_,
+    Status = "Insufficient valid observations",
+    stringsAsFactors = FALSE
+  )
+  
+  # Require at least 3 observations and distinct predictor values
+  if (nrow(fit_data) >= 3 &&
+      length(unique(fit_data$mi)) >= 2) {
+    
+    model <- lm(ln_Ci ~ mi, data = fit_data)
+    
+    C1_model_list[[as.character(extent - 2)]] <- model
+    
+    sm <- summary(model)
+    coefs <- sm$coefficients
+    
+    result$Intercept <- unname(coef(model)[1])
+    result$Slope <- unname(coef(model)[2])
+    result$Intercept_SE <- coefs[1, "Std. Error"]
+    result$Slope_SE <- coefs[2, "Std. Error"]
+    result$R.squared <- sm$r.squared
+    result$Adj.R.squared <- sm$adj.r.squared
+    result$Status <- "Fitted"
+  }
+  
+  model_summaries_surf_tot_activity[[as.character(extent)]] <- result
+}
+
+# Combine all candidate summaries
+model_summary_table <- do.call(
+  rbind,
+  model_summaries_surf_tot_activity
+)
+model_summaries_surf_tot_activity=model_summary_table
+rownames(model_summaries_surf_tot_activity) <- NULL
+print("Surface activity missing! Please determine total surface activity")
+
+activity <- concentrations_table[
+  seq(2, 20, by = 2),
+  "Excess Pb-210 Ci dpm/g"
+]
+C1_table[[3]] <- NA_real_
+names(C1_table)[3] <- "Ci"
+# Only take logarithms of finite, positive activities
+valid_activity <- is.finite(activity) & activity > 0
+
+C1_table$Ci[valid_activity] <- activity[valid_activity]
+
+print(C1_table)
+print(model_summaries_surf_tot_activity[,-(2:3)])
+selection_complete=FALSE
+while (selection_complete==FALSE){
+  best_model_index=readline(prompt = "Select model (1-8) ")
+  
+  # Step 3: Retrieve the corresponding model
+  best_model <- C1_model_list[[best_model_index]]
+  m1 <- C1_table[1,2]
+  
+  beta <- coef(best_model)
+  V <- vcov(best_model)
+  
+  log_C1 <- beta[1] + beta[2] * m1
+  log_C1_uncer <- sqrt(
+    V[1,1] +
+      m1^2 * V[2,2] +
+      2 * m1 * V[1,2]
+  )
+  
+  C1 <- exp(log_C1)
+  C1_uncer <- C1 * log_C1_uncer
+  print("Surface Activity (dpm/g)")
+  print(unname(C1))
+  selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
+}  
+}
+
+# Now interpolate any missing Total Pb-210 section values
+# using exponential interpolation.
+#Exponential interpolation:
+# B = A^(1-r) * C^r
+#Propagated uncertainty
+#u(B) = B * sqrt[(1-r)^2 * (u(A)/A)^2 + r^2 * (u(C)/C)^2]
+
+for (i in seq(2, nrow(concentrations_table), by = 2)){
+  # surface absence check
+  if (is.na(concentrations_table[2,"Excess Pb-210 Ci dpm/g"])){
+    concentrations_table[2,"Excess Pb-210 Ci dpm/g"]=C1
+    concentrations_table[2,"Excess Pb-210 Uncertainty u(Ci) dpm/g"]=C1_uncer
+  }
+  # Check whether this section is missing
+  if (is.na(concentrations_table[i,"Excess Pb-210 Ci dpm/g"])){
+    
+    # Find the first missing section in this contiguous gap
+    gap_start = i
+    
+    # Find the last missing section in this contiguous gap
+    gap_end = i
+    
+    while (
+      gap_end + 2 <= nrow(concentrations_table) &&
+      is.na(concentrations_table[gap_end + 2,
+                                 "Excess Pb-210 Ci dpm/g"])
+    ){
+      gap_end = gap_end + 2
+    }
+    
+    # Find the valid section immediately above the gap
+    j = gap_start - 2
+    
+    # Find the valid section immediately below the gap
+    k = gap_end + 2
+    
+    # Only interpolate if there is a valid section
+    # on both sides of the entire gap
+    if (j >= 2 &&
+        k <= nrow(concentrations_table) &&
+        !is.na(concentrations_table[j,"Excess Pb-210 Ci dpm/g"]) &&
+        !is.na(concentrations_table[k,"Excess Pb-210 Ci dpm/g"])){
+      
+      # Store the two bounding section concentrations
+      A = concentrations_table[j,"Excess Pb-210 Ci dpm/g"]
+      C = concentrations_table[k,"Excess Pb-210 Ci dpm/g"]
+      
+      # Store their uncertainties
+      u_A =
+        concentrations_table[j,
+                             "Excess Pb-210 Uncertainty u(Ci) dpm/g"]
+      
+      u_C =
+        concentrations_table[k,
+                             "Excess Pb-210 Uncertainty u(Ci) dpm/g"]
+      
+      # Fill every missing section in the gap
+      for (l in seq(gap_start, gap_end, by = 2)){
+        
+        # Fractional position of this section
+        # between the two bounding valid sections
+        fraction =
+          (concentrations_table[l,"Mass Depth mi g/cm^2"] -
+             concentrations_table[j,"Mass Depth mi g/cm^2"]) /
+          (concentrations_table[k,"Mass Depth mi g/cm^2"] -
+             concentrations_table[j,"Mass Depth mi g/cm^2"])
+        
+        concentrations_table[l,"Excess Pb-210 Ci dpm/g"] =
+          A^(1-fraction) * C^fraction
+        
+        concentrations_table[l,
+                             "Excess Pb-210 Uncertainty u(Ci) dpm/g"] =
+          concentrations_table[l,"Excess Pb-210 Ci dpm/g"] *
+          sqrt(
+            (1-fraction)^2 * (u_A / A)^2 +
+              fraction^2 * (u_C / C)^2
+          )
+      }
+    }
+  }
+}
+
+
+#C0CA calculations
+did_measure_C0=readline(prompt = "Do you have a measured surface layer Pb-210 activity C(0)? (True or False) ")
+if (did_measure_C0==TRUE){
+  measured_C0=as.numeric(readline(prompt = "Enter measured C(0) dpm/g "))
+  measured_C0_uncer=as.numeric(readline(prompt = "Enter measured C(0) uncertainty dpm/g "))
+}else{
+  C0CA_table=array(data=NA, dim=c(10,3), dimnames=list(NULL, c("zi","mi","ln(Ci)")))
+  
+  # Construct the first 10 interval records
+  C0CA_table <- data.frame(
+    zi = mass_table[seq(2, 20, by = 2), 2],
+    mi = concentrations_table[seq(2, 20, by = 2), 12],
+    ln_Ci = NA_real_
+  )
+  
+  activity <- concentrations_table[
+    seq(2, 20, by = 2),
+    "Excess Pb-210 Ci dpm/g"
+  ]
+  
+  # Only take logarithms of finite, positive activities
+  valid_activity <- is.finite(activity) & activity > 0
+  
+  C0CA_table$ln_Ci[valid_activity] <- log(activity[valid_activity])
+  
+  # Preserve the original-measurement rule
+  for (j in seq_len(nrow(C0CA_table))) {
+    if (is.na(original_section_Ci_evens[j]) ||
+        !original_section_Ci_evens[j]) {
+      C0CA_table$ln_Ci[j] <- NA_real_
+    }
+  }
+  
+  C0CA_model_list <- list()
+  model_summaries_C0CA_activity <- list()
+  
+  for (extent in 3:10) {
+    
+    candidate <- C0CA_table[seq_len(extent), ]
+    
+    # Identify valid observations
+    valid <- is.finite(candidate[, "mi"]) &
+      is.finite(candidate[, "ln_Ci"])
+    
+    fit_data <- candidate[valid, , drop = FALSE]
+    
+    # Use the same columns for every candidate model
+    result <- data.frame(
+      Model = paste0("Indices 1-", extent),
+      N = nrow(fit_data),
+      Used_indices = paste(which(valid), collapse = ", "),
+      Intercept = NA_real_,
+      Slope = NA_real_,
+      Intercept_SE = NA_real_,
+      Slope_SE = NA_real_,
+      R.squared = NA_real_,
+      Adj.R.squared = NA_real_,
+      Status = "Insufficient valid observations",
+      stringsAsFactors = FALSE
+    )
+    
+    # Require at least 3 observations and distinct predictor values
+    if (nrow(fit_data) >= 3 &&
+        length(unique(fit_data$mi)) >= 2) {
+      
+      model <- lm(ln_Ci ~ mi, data = fit_data, na.action = na.exclude)
+      
+      C0CA_model_list[[as.character(extent - 2)]] <- model
+      
+      sm <- summary(model)
+      coefs <- sm$coefficients
+      
+      result$Intercept <- unname(coef(model)[1])
+      result$Slope <- unname(coef(model)[2])
+      result$Intercept_SE <- coefs[1, "Std. Error"]
+      result$Slope_SE <- coefs[2, "Std. Error"]
+      result$R.squared <- sm$r.squared
+      result$Adj.R.squared <- sm$adj.r.squared
+      result$Status <- "Fitted"
+    }
+    
+    model_summaries_C0CA_activity[[as.character(extent)]] <- result
+  }
+  
+  # Combine all candidate summaries
+  model_summary_table <- do.call(
+    rbind,
+    model_summaries_C0CA_activity
+  )
+  model_summaries_C0CA_activity=model_summary_table
+  rownames(model_summaries_C0CA_activity) <- NULL
+  print("Please determine surface layer excess Pb-210 activity")
+  
+  activity <- concentrations_table[
+    seq(2, 20, by = 2),
+    "Excess Pb-210 Ci dpm/g"
+  ]
+  C0CA_table[[3]] <- NA_real_
+  names(C0CA_table)[3] <- "Ci"
+  # Only take logarithms of finite, positive activities
+  valid_activity <- is.finite(activity) & activity > 0
+  
+  C0CA_table$Ci[valid_activity] <- activity[valid_activity]
+  
+  # Preserve the original-measurement rule
+  for (j in seq_len(nrow(C0CA_table))) {
+    if (is.na(original_section_Ci_evens[j]) ||
+        !original_section_Ci_evens[j]) {
+      C0CA_table$Ci[j] <- NA_real_
+    }
+  }
+  print(C0CA_table)
+  print(model_summaries_C0CA_activity[,-(2:3)])
+  selection_complete=FALSE
+  while (selection_complete==FALSE){
+    best_model_index=readline(prompt = "Select model (1-8) ")
+    
+    # Step 3: Retrieve the corresponding model
+    best_model <- C0CA_model_list[[best_model_index]]
+    
+    C0CA <- exp(best_model$coefficients[1])
+    C0CA_uncer <- C0CA*summary(best_model)$coefficients[1, 2]
+    print("Surface Activity (dpm/g)")
+    print(unname(C0CA))
+    selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
+  }  
+}
+
 # inventory, inventory uncertainty, mass depth, ln(Ci), u(ln(Ci)) calculations
 
-for (i in 1:nrow(concentrations_table)){
-  if (i %% 2 == 0) {
-    concentrations_table[i,10]=concentrations_table[i,6]*mass_table[i,6]
-    concentrations_table[i,11]=concentrations_table[i,10]*sqrt(sum((concentrations_table[i,7]/concentrations_table[i,6])^2,(mass_table[i,7]/mass_table[i,6])^2))
-    concentrations_table[i,13]=log(concentrations_table[i,6])
-    concentrations_table[i,14]=concentrations_table[i,7]/concentrations_table[i,6]
-  }
-}
-
-#COCA calculations
-C0CA_table=array(data=NA, dim=c(10,3), dimnames=list(NULL, c("zi","mi","ln(Ci)")))
-C0CA_table[,1]=na.omit(mass_table[1:20,2])
-C0CA_table[,2]=na.omit(concentrations_table[1:20,12])
-C0CA_table[,3]=na.omit(concentrations_table[1:20,13])
-
-C0CA_model_list=list()
-for (i in 3:10) {
-  # Define the extent of the data to use for the model
-  extent <- i  # This will give 3, 4, ..., 10
+for (i in seq(2, nrow(concentrations_table), by = 2)) {
   
-  # Extract the x and y values from the array
-  x_values <- C0CA_table[1:extent, 2]  # Column 2 for x values
-  y_values <- C0CA_table[1:extent, 3]  # Column 3 for y values
+  # Inventory can use interpolated section Ci
+  concentrations_table[i,10] =
+    concentrations_table[i,6] * mass_table[i,6]
   
-  # Fit the linear model and store it in the list
-  C0CA_model_list[[i-2]] <- lm(y_values ~ x_values)
+  concentrations_table[i,11] =
+    concentrations_table[i,10] *
+    sqrt(
+      sum(
+        (concentrations_table[i,7] /
+           concentrations_table[i,6])^2,
+        (mass_table[i,7] /
+           mass_table[i,6])^2
+      )
+    )
+    concentrations_table[i,13] =
+      log(concentrations_table[i,6])
+    
+    concentrations_table[i,14] =
+      concentrations_table[i,7] /
+      concentrations_table[i,6]
 }
-# Step 1: Extract R^2 values
-r_squared_values <- sapply(C0CA_model_list, function(model) summary(model)$adj.r.squared)
-
-# Step 2: Identify the index of the model with the highest R^2
-best_model_index <- which.max(r_squared_values)
-
-# Step 3: Retrieve the corresponding model
-best_model <- C0CA_model_list[[best_model_index]]
 
 # C(i)
-for (i in 1:nrow(concentrations_table)-1){
-  if (i==1){
-    concentrations_table[i,8]=exp(best_model$coefficients[1])
-  }else{
-    if (i %% 2 == 1) {
-      concentrations_table[i,8]=(concentrations_table[i+1,6]+concentrations_table[i-1,6])/2
+# Exponential Pb-210 concentration interpolation
+# performed as linear interpolation in ln(C)
+
+for (i in 1:nrow(concentrations_table)){
+  if (i %% 2 == 1){
+    
+    if (i == 1){
+      
+      if(did_measure_C0==FALSE){
+        concentrations_table[i,8]=C0CA
+        concentrations_table[i,9]=C0CA_uncer
+      }else{
+        concentrations_table[i,8]=measured_C0
+        concentrations_table[i,9]=measured_C0_uncer
+      }
+      
+    } else {
+      
+      # Fractional position of layer between bounding sections
+      fraction =
+        (concentrations_table[i,"Cumulative Mass Depth Layer m(i) gcm^-2"] -
+           concentrations_table[(i-1),"Mass Depth mi g/cm^2"]) /
+        (concentrations_table[(i+1),"Mass Depth mi g/cm^2"] -
+           concentrations_table[(i-1),"Mass Depth mi g/cm^2"])
+      
+      # Bounding section log concentrations
+      ln_A = concentrations_table[(i-1),"ln(Ci)"]
+      ln_C = concentrations_table[(i+1),"ln(Ci)"]
+      
+      # Bounding section log uncertainties
+      u_ln_A = concentrations_table[(i-1),"u(ln(Ci))"]
+      u_ln_C = concentrations_table[(i+1),"u(ln(Ci))"]
+      
+      # Linear interpolation in log space
+      
+      concentrations_table[i,"ln(Ci)"] =
+        (1 - fraction) * ln_A +
+        fraction * ln_C
+      
+      # Propagated uncertainty in log space
+      
+      concentrations_table[i,"u(ln(Ci))"] =
+        sqrt(
+          (1 - fraction)^2 * u_ln_A^2 +
+            fraction^2 * u_ln_C^2
+        )
+      
+      # Convert log concentration back to concentration
+      
+      concentrations_table[i,"Excess Pb-210 C(i) dpm/g"] =
+        exp(concentrations_table[i,"ln(Ci)"])
+      
+      # Convert log uncertainty back to concentration uncertainty
+      
+      concentrations_table[i,"Excess Pb-210 Uncertainty u(C(i)) dpm/g"] =
+        concentrations_table[i,"Excess Pb-210 C(i) dpm/g"] *
+        concentrations_table[i,"u(ln(Ci))"]
     }
   }
 }
-# C(i) uncertainty (hardcoded first value may require adjustment)
-for (i in 1:nrow(concentrations_table)-1){
-  if (i==1){
-    concentrations_table[i,9]=concentrations_table[i,8]*(summary(best_model)$coefficients[1, 2])
-  }else{
-    if (i %% 2 == 1) {
-      concentrations_table[i,9]= sqrt(sum(concentrations_table[i+1,7]^2, concentrations_table[i-1,7]^2))/2
-    }
+for (i in 1:nrow(concentrations_table)){
+  if (original_section_Ci[i]==FALSE){
+    concentrations_table[i,13]=NA
+    concentrations_table[i,14]=NA
   }
 }
 #save off copies of background-corrected mass and concentration data, accompanying plots
@@ -1143,108 +1479,15 @@ concentrations_file_path <- file.path(folder_name, "concentrations_data.xlsx")
 write_xlsx(as.data.frame(concentrations_table), concentrations_file_path)
 
 #C0CA save
-model_summaries <- data.frame(Model = character(),
-                              Coefficient = character(),
-                              Estimate = numeric(),
-                              Std.Error = numeric(),
-                              t.value = numeric(),
-                              Pr.t = numeric(),
-                              Adj.R.squared = numeric(),
-                              stringsAsFactors = FALSE)
+write_xlsx(model_summaries_C0CA_activity, path = "Background corrected mass and concentration data/C0CA_model_summaries.xlsx")
+#missing surface save
 
-# Extract information from each model and store it in the data frame
-for (model_index in seq_along(C0CA_model_list)) {
-  model <- C0CA_model_list[[model_index]]
-  
-  # Check if the model is valid
-  if (!is.null(model)) {
-    summary_model <- summary(model)
-    
-    # Extract coefficients
-    coefficients <- summary_model$coefficients
-    for (i in 1:nrow(coefficients)) {
-      model_summaries <- rbind(model_summaries, 
-                               data.frame(Model = paste("Model", model_index, "Indices 1-",model_index+2),  # Adjusting index for naming
-                                          Coefficient = rownames(coefficients)[i],
-                                          Estimate = coefficients[i, "Estimate"],
-                                          Std.Error = coefficients[i, "Std. Error"],
-                                          t.value = coefficients[i, "t value"],
-                                          Pr.t = coefficients[i, "Pr(>|t|)"],
-                                          Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
-                                          stringsAsFactors = FALSE))
-    }
-  } else {
-    cat("Model at index", model_index, "is NULL or invalid.\n")
-  }
+if (exists("C1_model_list")){
+  write_xlsx(model_summaries_surf_tot_activity, path = "Background corrected mass and concentration data/surf_ex_activity_model_summaries.xlsx")
 }
-write_xlsx(model_summaries, path = "Background corrected mass and concentration data/C0CA_model_summaries.xlsx")
 
-#REML save
-if (exists("fit_REML", inherits = TRUE) && inherits(get("fit_REML", inherits = TRUE), "rma.uni")) {
-  s <- summary(fit_REML)
-  
-  params <- data.frame(
-    parameter = c("mu_hat", "se_mu", "ci_lb", "ci_ub", "tau2", "tau", "I2", "H2",
-                  "QE", "QE_df", "QE_pval", "k", "method", "test"),
-    value = c(mu_hat,
-              se_mu,
-              as.numeric(s$ci.lb),
-              as.numeric(s$ci.ub),
-              tau2,
-              tau,
-              as.numeric(s$I2),
-              as.numeric(s$H2),
-              as.numeric(s$QE),
-              as.numeric(s$k - 1),
-              as.numeric(s$QEp),
-              as.numeric(s$k),
-              as.character(fit_REML$method),
-              as.character(fit_REML$test))
-  )
-  
-  ## ---- Optional: full coefficient table (handles multiple moderators too) ----
-  coef_tbl <- data.frame(
-    term    = rownames(s$beta),
-    estimate = as.numeric(s$beta),
-    se       = as.numeric(s$se),
-    test_stat = as.numeric(s$zval),   # for knha this is typically t; metafor still stores in this slot
-    p_value  = as.numeric(s$pval),
-    ci_lb    = as.numeric(s$ci.lb),
-    ci_ub    = as.numeric(s$ci.ub),
-    row.names = NULL
-  )
-  
-  # ---- Optional: fitted values / residuals per study (robust) ----
-  k <- fit_REML$k
-  yi <- fit_REML$yi
-  vi <- fit_REML$vi
-  sei <- if (!is.null(fit_REML$sei) && length(fit_REML$sei) == k) fit_REML$sei else sqrt(vi)
-  
-  w <- as.numeric(weights(fit_REML))
-  fv <- as.numeric(fitted(fit_REML))
-  rs <- as.numeric(residuals(fit_REML))
-  
-  study_tbl <- data.frame(
-    study_id = seq_len(k),
-    yi = yi,
-    sei = sei,
-    vi = vi,
-    weight = w,
-    fitted = fv,
-    resid = rs,
-    row.names = NULL
-  )
-  
-  ## ---- Write to Excel (multiple sheets) ----
-  out_file <- "Background corrected mass and concentration data/REML_meta_model_summary.xlsx"
-  write_xlsx(
-    list(
-      Parameters = params,
-      Coefficients = coef_tbl,
-      Studies = study_tbl
-    ),
-    path = out_file
-  )
+if (exists("decay_summary")){
+  write_xlsx(decay_summary, path = "Background corrected mass and concentration data/decay_correction_summary.xlsx")
 }
 
 # make plots
@@ -1258,19 +1501,38 @@ dbd_plotting_table[,2]=na.omit(mass_table[,4])
 dbd_plotting_table[,3]=na.omit(mass_table[,5])
 dbd_plotting_table=as.data.frame(dbd_plotting_table)
 # Generate breaks dynamically
-y_breaks <- seq(min(dbd_plotting_table$y), max(dbd_plotting_table$y), by = breaks_by_value(dbd_plotting_table, "y"))
-# Create the plot
-dbd_plot = ggplot(dbd_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(ymin = y - y_uncertainty, ymax = y + y_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Dry Bulk Density vs Depth", x = "Mid Depth (cm)", y = "Dry Bulk Density (g/cm^3)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(dbd_plotting_table$x), max(dbd_plotting_table$x), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
-  scale_y_continuous(breaks = y_breaks,  # Set y-axis breaks
-                     labels = scales::number_format(accuracy = accuracy_finder(dbd_plotting_table[, 3]))) +  # Set y-axis labels
-  theme_minimal()  # Use a minimal theme
-#by = breaks_by_value(tpb210_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(tpb210_plotting_table[,3]))) +  # Set x-axis dynamically
+
+dbd_plotting_table <- as.data.frame(dbd_plotting_table)
+
+dbd_plot <- ggplot(dbd_plotting_table, aes(x = x, y = y)) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      ymin = y - y_uncertainty,
+      ymax = y + y_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Dry Bulk Density vs Depth",
+    x = "Mid Depth (cm)",
+    y = "Dry Bulk Density (g/cm^3)"
+  ) +
+  dynamic_scale(
+    dbd_plotting_table,
+    "x",
+    axis = "x"
+  ) +
+  dynamic_scale(
+    dbd_plotting_table,
+    "y",
+    axis = "y"
+  ) +
+  theme_minimal()
+
 print(dbd_plot)
 dev.off()
+print(dbd_plot)
 # excess pb-210
 pdf(file.path(folder_name, "excess_pb210.pdf"), width = 8, height = 6)
 epb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
@@ -1278,61 +1540,149 @@ epb210_plotting_table[,1]=na.omit(concentrations_table[,6])
 epb210_plotting_table[,2]=na.omit(concentrations_table[,1])
 epb210_plotting_table[,3]=na.omit(concentrations_table[,7])
 epb210_plotting_table=as.data.frame(epb210_plotting_table)
-epb210_plot=ggplot(epb210_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Excess Pb-210 vs Depth", x = "Excess Pb-210 (dmp/g)", y ="Mid Depth (cm)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(epb210_plotting_table$x), max(epb210_plotting_table$x), by = breaks_by_value(epb210_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(epb210_plotting_table[,3]))) +  # Set x-axis dynamically
-  scale_y_reverse(breaks = seq(min(epb210_plotting_table$y), max(epb210_plotting_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set y-axis dynamically
-  theme_minimal()  # Use a minimal theme
+epb210_plot <- ggplot(
+  epb210_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Excess Pb-210 vs Depth",
+    x = "Excess Pb-210 (dpm/g)",
+    y = "Mid Depth (cm)"
+  ) +
+  dynamic_scale(
+    epb210_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    epb210_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(epb210_plot)
 dev.off()
 # supported pb-210
 pdf(file.path(folder_name, "supported_pb210.pdf"), width = 8, height = 6)
 spb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
-spb210_plotting_table[,1]=na.omit(concentrations_table[,4])
-spb210_plotting_table[,2]=na.omit(concentrations_table[,1])
-spb210_plotting_table[,3]=na.omit(concentrations_table[,5])
+spb210_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),4]
+spb210_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),1]
+spb210_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),5]
 spb210_plotting_table=as.data.frame(spb210_plotting_table)
-spb210_plot = ggplot(spb210_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Supported Pb-210 vs Depth", x = "Supported Pb-210 (dmp/g)", y = "Mid Depth (cm)") +  # Add labels
-  scale_x_continuous(limits = c(0, 6), breaks = seq(0, 6, by = 0.5),labels=scales::number_format(accuracy=accuracy_finder(epb210_plotting_table[,3]))) +  # Set x-axis limits and increments of 0.1
-  scale_y_reverse(breaks = seq(min(spb210_plotting_table$y), max(spb210_plotting_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
-  theme_minimal()  # Use a minimal theme
+spb210_plot <- ggplot(
+  spb210_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Supported Pb-210 vs Depth",
+    x = "Supported Pb-210 (dpm/g)",
+    y = "Mid Depth (cm)"
+  ) +
+  dynamic_scale(
+    spb210_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    spb210_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(spb210_plot)
 dev.off()
 # total pb-210
 pdf(file.path(folder_name, "total_pb210.pdf"), width = 8, height = 6)
 tpb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
-tpb210_plotting_table[,1]=na.omit(concentrations_table[,2])
-tpb210_plotting_table[,2]=na.omit(concentrations_table[,1])
-tpb210_plotting_table[,3]=na.omit(concentrations_table[,3])
+tpb210_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),2]
+tpb210_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),1]
+tpb210_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),3]
 tpb210_plotting_table=as.data.frame(tpb210_plotting_table)
-tpb210_plot=ggplot(tpb210_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Total Pb-210 vs Depth", x = "Total Pb-210 (dmp/g)", y ="Mid Depth (cm)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(tpb210_plotting_table$x), max(tpb210_plotting_table$x), by = breaks_by_value(tpb210_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(tpb210_plotting_table[,3]))) +  # Set x-axis dynamically
-  scale_y_reverse(breaks = seq(min(tpb210_plotting_table$y), max(tpb210_plotting_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
-  theme_minimal()  # Use a minimal theme
+tpb210_plot <- ggplot(
+  tpb210_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Total Pb-210 vs Depth",
+    x = "Total Pb-210 (dpm/g)",
+    y = "Mid Depth (cm)"
+  ) +
+  dynamic_scale(
+    tpb210_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    tpb210_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(tpb210_plot)
 dev.off()
 # total log scale pb-210
 pdf(file.path(folder_name, "excess_log_pb210.pdf"), width = 8, height = 6)
 tlogpb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
-tlogpb210_plotting_table[,1]=na.omit(concentrations_table[,13])
-tlogpb210_plotting_table[,2]=na.omit(concentrations_table[,1])
-tlogpb210_plotting_table[,3]=na.omit(concentrations_table[,14])
+tlogpb210_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),13]
+tlogpb210_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),1]
+tlogpb210_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),14]
 tlogpb210_plotting_table=as.data.frame(tlogpb210_plotting_table)
-tlogpb210_plot=ggplot(tlogpb210_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Excess Log-scale Pb-210 vs Depth", x = "Excess Log-scale Pb-210 (dmp/g)", y ="Mid Depth (cm)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(tlogpb210_plotting_table$x), max(tlogpb210_plotting_table$x), by = breaks_by_value(tlogpb210_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(tlogpb210_plotting_table[,3]))) +  # Set x-axis dynamically
-  scale_y_reverse(breaks = seq(min(tlogpb210_plotting_table$y), max(tlogpb210_plotting_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
-  theme_minimal()  # Use a minimal theme
+tlogpb210_plot <- ggplot(
+  tlogpb210_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Excess Log-scale Pb-210 vs Depth",
+    x = "Excess Log-scale Pb-210 (dpm/g)",
+    y = "Mid Depth (cm)"
+  ) +
+  dynamic_scale(
+    tlogpb210_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    tlogpb210_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(tlogpb210_plot)
 dev.off()
 
@@ -1344,62 +1694,155 @@ epb210_md_plotting_table[,1]=na.omit(concentrations_table[,6])
 epb210_md_plotting_table[,2]=na.omit(concentrations_table[,12])
 epb210_md_plotting_table[,3]=na.omit(concentrations_table[,7])
 epb210_md_plotting_table=as.data.frame(epb210_md_plotting_table)
-epb210_md_plot=ggplot(epb210_md_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Excess Pb-210 vs Cumulative Mass Depth", x = "Excess Pb-210 (dmp/g)", y ="Cumulative Mass Depth (g/cm^2)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(epb210_md_plotting_table$x), max(epb210_md_plotting_table$x), by = breaks_by_value(epb210_md_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(epb210_md_plotting_table[,3]))) +  # Set x-axis dynamically
-  scale_y_reverse(breaks = seq(min(epb210_md_plotting_table$y), max(epb210_md_plotting_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
-  theme_minimal()  # Use a minimal theme
+epb210_md_plot <- ggplot(
+  epb210_md_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Excess Pb-210 vs Cumulative Mass Depth",
+    x = "Excess Pb-210 (dpm/g)",
+    y = "Cumulative Mass Depth (g/cm^2)"
+  ) +
+  dynamic_scale(
+    epb210_md_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    epb210_md_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(epb210_md_plot)
 dev.off()
 # supported pb-210 mass depth
 pdf(file.path(folder_name, "supported_pb210_md.pdf"), width = 8, height = 6)
 spb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
-spb210_md_plotting_table[,1]=na.omit(concentrations_table[,4])
-spb210_md_plotting_table[,2]=na.omit(concentrations_table[,12])
-spb210_md_plotting_table[,3]=na.omit(concentrations_table[,5])
+spb210_md_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),4]
+spb210_md_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),12]
+spb210_md_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),5]
 spb210_md_plotting_table=as.data.frame(spb210_md_plotting_table)
-spb210_md_plot = ggplot(spb210_md_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Supported Pb-210 vs Cumulative Mass Depth", x = "Supported Pb-210 (dmp/g)", y = "Cumulative Mass Depth (g/cm^2)") +  # Add labels
-  scale_x_continuous(limits = c(0, 6), breaks = seq(0, 6, by = 0.5),labels=scales::number_format(accuracy=accuracy_finder(epb210_plotting_table[,3]))) +
-  scale_y_reverse(breaks = seq(min(spb210_md_plotting_table$y), max(spb210_md_plotting_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
-  theme_minimal()  # Use a minimal theme
+spb210_md_plot <- ggplot(
+  spb210_md_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Supported Pb-210 vs Cumulative Mass Depth",
+    x = "Supported Pb-210 (dpm/g)",
+    y = "Cumulative Mass Depth (g/cm^2)"
+  ) +
+  dynamic_scale(
+    spb210_md_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    spb210_md_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(spb210_md_plot)
 dev.off()
 # total pb-210 mass depth 
 pdf(file.path(folder_name, "total_pb210_md.pdf"), width = 8, height = 6)
 tpb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
-tpb210_md_plotting_table[,1]=na.omit(concentrations_table[,2])
-tpb210_md_plotting_table[,2]=na.omit(concentrations_table[,12])
-tpb210_md_plotting_table[,3]=na.omit(concentrations_table[,3])
+tpb210_md_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),2]
+tpb210_md_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),12]
+tpb210_md_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),3]
 tpb210_md_plotting_table=as.data.frame(tpb210_md_plotting_table)
-tpb210_md_plot=ggplot(tpb210_md_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Total Pb-210 vs Cumulative Mass Depth", x = "Total Pb-210 (dmp/g)", y ="Cumulative Mass Depth (g/cm^2)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(tpb210_md_plotting_table$x), max(tpb210_md_plotting_table$x), by = breaks_by_value(tpb210_md_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(tpb210_md_plotting_table[,3]))) +  # Set x-axis dynamically
-  scale_y_reverse(breaks = seq(min(tpb210_md_plotting_table$y), max(tpb210_md_plotting_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
-  theme_minimal()  # Use a minimal theme
+tpb210_md_plot <- ggplot(
+  tpb210_md_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Total Pb-210 vs Cumulative Mass Depth",
+    x = "Total Pb-210 (dpm/g)",
+    y = "Cumulative Mass Depth (g/cm^2)"
+  ) +
+  dynamic_scale(
+    tpb210_md_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    tpb210_md_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(tpb210_md_plot)
 dev.off()
 # Excess log scale pb-210 mass depth
 pdf(file.path(folder_name, "excess_log_pb210_md.pdf"), width = 8, height = 6)
 tlogpb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
-tlogpb210_md_plotting_table[,1]=na.omit(concentrations_table[,13])
+tlogpb210_md_plotting_table[,1]=log(na.omit(concentrations_table[,6]))
 tlogpb210_md_plotting_table[,2]=na.omit(concentrations_table[,12])
-tlogpb210_md_plotting_table[,3]=na.omit(concentrations_table[,14])
+tlogpb210_md_plotting_table[,3]=na.omit(concentrations_table[,7]/concentrations_table[,6])
 tlogpb210_md_plotting_table=as.data.frame(tlogpb210_md_plotting_table)
-tlogpb210_md_plot=ggplot(tlogpb210_md_plotting_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  geom_smooth(method = "lm", formula = y ~ x,  se = FALSE, color = "red") +
-  labs(title = "Excess Log-scale Pb-210 vs Cumulative Mass Depth", x = "Excess Log-scale Pb-210 (dmp/g)", y ="Cumulative Mass Depth (g/cm^2)") +  # Add labels
-  scale_x_continuous(breaks = seq(min(tlogpb210_md_plotting_table$x), max(tlogpb210_md_plotting_table$x), by = breaks_by_value(tlogpb210_md_plotting_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(tlogpb210_md_plotting_table[,3]))) +  # Set x-axis dynamically
-  scale_y_reverse(breaks = seq(min(tlogpb210_md_plotting_table$y), max(tlogpb210_md_plotting_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
-  theme_minimal()  # Use a minimal theme
+tlogpb210_md_plot <- ggplot(
+  tlogpb210_md_plotting_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  geom_smooth(
+    method = "lm",
+    formula = y ~ x,
+    se = FALSE,
+    color = "red"
+  ) +
+  labs(
+    title = "Excess Log-scale Pb-210 vs Cumulative Mass Depth",
+    x = "Excess Log-scale Pb-210 (dpm/g)",
+    y = "Cumulative Mass Depth (g/cm^2)"
+  ) +
+  dynamic_scale(
+    tlogpb210_md_plotting_table,
+    "x"
+  ) +
+  dynamic_scale(
+    tlogpb210_md_plotting_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
 print(tlogpb210_md_plot)
 dev.off()
 #make constants table to save
@@ -1470,11 +1913,465 @@ constants_table_csv$value <- vapply(
 constants_file_path <- file.path(folder_name, "constants_table.xlsx")
 write_xlsx(constants_table_csv, constants_file_path)
 #start of CFCS section
-CFCS_table=array(data=NA, dim=c(nrow(concentrations_table)/2,6), dimnames=list(NULL,c("zi","mi","ln(Ci)","Time yr","Date (yr)", "Time Uncertainty (yr)")))
+CFCS_table=array(data=NA, dim=c(nrow(concentrations_table)/2,6), dimnames=list(NULL,c("zi","mi","ln(Ci)","Time yr","Date (CE)", "Time Uncertainty (yr)")))
+colnames(CFCS_table) <- gsub("delta", "\u0394", colnames(CFCS_table))
 CFCS_table[,1]=na.omit(concentrations_table[,1])
 CFCS_table[,2]=na.omit(concentrations_table[,12])
-CFCS_table[,3]=na.omit(concentrations_table[,13])
+for(i in 1:nrow(concentrations_table)){
+  if (i%%2==0){
+    CFCS_table[(i/2),3]=concentrations_table[i,13]
+  }
+}
 CFCS_table=as.data.frame(CFCS_table)
+
+#generate compaction corrected depths for alternative SAR calculations in CFCS/CA
+zi_correction <- readline(prompt ="Do you want to calculate compaction corrected SAR for CFCS and CA models (TRUE or FALSE)? ")
+zi_correction <- tolower(trimws(zi_correction))
+if (zi_correction %in% c("true", "t", "yes", "y")) {
+  print("select porosity data")
+  file_path_porosity <- file.choose()
+  porosity_data <- read_excel(file_path_porosity,col_names = TRUE,col_types = "numeric", .name_repair = "unique_quiet")
+  porosity_data <- as.data.frame(porosity_data)
+  measured_phi <- as.numeric(porosity_data[[1]])
+  measured_phi_sd <- as.numeric(porosity_data[[2]])
+  n_measured <- length(measured_phi)
+  zi_correction_table <-as.data.frame(mass_table[, 1:3])
+  zi_correction_table$`Porosity` <- NA_real_
+  zi_correction_table$`Porosity Uncertainty` <- NA_real_
+  zi_correction_table$`Uncompacted Section Thickness (cm)` <-NA_real_
+  zi_correction_table$`Uncompacted Section Thickness Uncertainty (cm)` <-NA_real_
+  zi_correction_table$`Uncompacted Top of Interval (cm)` <-NA_real_
+  zi_correction_table$`Uncompacted Top of Interval Uncertainty (cm)` <-NA_real_
+  zi_correction_table$`Uncompacted Mid-Depth (cm)` <-NA_real_
+  zi_correction_table$`Uncompacted Mid-Depth Uncertainty (cm)` <-NA_real_
+  
+  all_rows <- seq_len(nrow(zi_correction_table))
+  section_rows <- all_rows[all_rows %% 2 == 0]
+  top_rows <- all_rows[all_rows %% 2 == 1]
+  n_sections <- length(section_rows)
+  
+  # Assign measured porosity values to corresponding sections
+  n_insert <- min(n_sections, n_measured)
+  
+  if (n_insert > 0) {
+    measured_sections <- seq_len(n_insert)
+    
+    zi_correction_table[section_rows[measured_sections], "Porosity"] <-
+      measured_phi[measured_sections]
+    
+    zi_correction_table[section_rows[measured_sections], "Porosity Uncertainty"] <-
+      measured_phi_sd[measured_sections]
+  }
+  measured_porosity=readline(prompt="Do you have a measured surface layer porosity value? (TRUE or FALSE)")
+  
+  if (measured_porosity==TRUE){
+    
+    # PATHWAY 1: Independently measured surface porosity
+    
+    phi_0=as.numeric(readline(prompt="Enter surface layer porosity"))
+    phi_0_uncer=as.numeric(readline(prompt="Enter surface layer porosity uncertainty"))
+    
+    phi_0_variance <- phi_0_uncer^2
+    Cov_phi0_measured <- numeric(n_measured)
+    
+  }else{
+    
+    # PATHWAY 2: Regression-derived surface porosity
+    
+    porosity_table=array(data=NA, dim=c(10,2), dimnames=list(NULL, c("zi","phi(i)")))
+    
+    porosity_table <- data.frame(
+      zi = as.numeric(zi_correction_table[seq(2, 20, by = 2), 2]),
+      phi_i = as.numeric(zi_correction_table[seq(2, 20, by = 2), "Porosity"])
+    )
+    
+    porosity_model_list <- list()
+    model_summaries_porosity <- list()
+    model_source_rows <- list()
+    
+    for (extent in 3:10) {
+      
+      candidate <- porosity_table[seq_len(extent), ]
+      
+      valid <- is.finite(candidate[, "zi"]) &
+        is.finite(candidate[, "phi_i"])
+      
+      fit_data <- candidate[valid, , drop = FALSE]
+      
+      result <- data.frame(
+        Model = paste0("Indices 1-", extent),
+        N = nrow(fit_data),
+        Used_indices = paste(which(valid), collapse = ", "),
+        Intercept = NA_real_,
+        Slope = NA_real_,
+        Intercept_SE = NA_real_,
+        Slope_SE = NA_real_,
+        R.squared = NA_real_,
+        Adj.R.squared = NA_real_,
+        Status = "Insufficient valid observations",
+        stringsAsFactors = FALSE
+      )
+      
+      if (nrow(fit_data) >= 3 &&
+          length(unique(fit_data$zi)) >= 2) {
+        
+        model <- lm(phi_i ~ zi, data = fit_data)
+        
+        porosity_model_list[[as.character(extent - 2)]] <- model
+        
+        model_source_rows[[as.character(extent - 2)]] <-
+          section_rows[which(valid)]
+        
+        sm <- summary(model)
+        coefs <- sm$coefficients
+        
+        result$Intercept <- unname(coef(model)[1])
+        result$Slope <- unname(coef(model)[2])
+        result$Intercept_SE <- coefs[1, "Std. Error"]
+        result$Slope_SE <- coefs[2, "Std. Error"]
+        result$R.squared <- sm$r.squared
+        result$Adj.R.squared <- sm$adj.r.squared
+        result$Status <- "Fitted"
+      }
+      
+      model_summaries_porosity[[as.character(extent)]] <- result
+    }
+    
+    model_summary_table <- do.call(rbind, model_summaries_porosity)
+    model_summaries_porosity <- model_summary_table
+    rownames(model_summaries_porosity) <- NULL
+    
+    print("Determine surface layer porosity")
+    print(porosity_table)
+    print(model_summaries_porosity[,-(2:3)])
+    
+    selection_complete <- FALSE
+    
+    while (selection_complete == FALSE) {
+      
+      best_model_index <- readline(prompt = "Select model (1-8) ")
+      
+      best_model <- porosity_model_list[[best_model_index]]
+      
+      print("Estimated surface porosity")
+      print(unname(coef(best_model)[1]))
+      
+      selection_complete <- readline(
+        prompt = "Accept model selection? (TRUE or FALSE) "
+      )
+    }
+    
+    best_model <- porosity_model_list[[best_model_index]]
+    best_source_rows <- model_source_rows[[best_model_index]]
+    
+    beta <- coef(best_model)
+    phi_0 <- unname(beta["(Intercept)"])
+  }
+  
+  
+  # COMMON PATHWAY: Down-core porosity and covariance
+  
+  if (length(measured_phi_sd) != n_measured) {
+    stop("Porosity measurements and uncertainties have different lengths.")
+  }
+  
+  valid_measurement <- is.finite(measured_phi)
+  
+  measured_phi_for_math <- measured_phi
+  measured_phi_for_math[!valid_measurement] <- 0
+  
+  if (any(!is.finite(measured_phi_sd[valid_measurement])) ||
+      any(measured_phi_sd[valid_measurement] < 0)) {
+    stop("Invalid uncertainty for a measured porosity.")
+  }
+  
+  measurement_variance <- numeric(n_measured)
+  
+  measurement_variance[valid_measurement] <-
+    measured_phi_sd[valid_measurement]^2
+  
+  Sigma_measured <- diag(
+    measurement_variance,
+    nrow = n_measured,
+    ncol = n_measured
+  )
+  
+  # Construct measurement weight matrix
+  
+  W <- matrix(0, nrow = n_sections, ncol = n_measured)
+  
+  n_direct <- min(n_sections, n_measured)
+  
+  if (n_direct > 0) {
+    for (i in seq_len(n_direct)) {
+      if (valid_measurement[i]) {
+        W[i, i] <- 1
+      }
+    }
+  }
+  
+  W_original <- W
+  
+  # Interpolate missing porosity using original measurements only
+  
+  for (i in seq_len(n_sections)) {
+    
+    if (all(W_original[i, ] == 0)) {
+      
+      j <- i - 1
+      
+      while (j >= 1 && all(W_original[j, ] == 0)) {
+        j <- j - 1
+      }
+      
+      k <- i + 1
+      
+      while (k <= n_sections && all(W_original[k, ] == 0)) {
+        k <- k + 1
+      }
+      
+      if (j >= 1 && k <= n_sections) {
+        
+        depth_i <- zi_correction_table[
+          section_rows[i], "Mid Depth zi cm"
+        ]
+        
+        depth_j <- zi_correction_table[
+          section_rows[j], "Mid Depth zi cm"
+        ]
+        
+        depth_k <- zi_correction_table[
+          section_rows[k], "Mid Depth zi cm"
+        ]
+        
+        denominator <- depth_k - depth_j
+        
+        if (!all(is.finite(c(depth_i, depth_j, depth_k))) ||
+            denominator == 0) {
+          stop(paste("Invalid interpolation depths at section", i))
+        }
+        
+        fraction <- (depth_i - depth_j) / denominator
+        
+        if (fraction < 0 || fraction > 1) {
+          stop(paste("Invalid interpolation fraction at section", i))
+        }
+        
+        W[i, ] <-
+          (1 - fraction) * W_original[j, ] +
+          fraction * W_original[k, ]
+      }
+    }
+  }
+  
+  if (any(rowSums(abs(W)) == 0)) {
+    stop("Some sections have no valid porosity measurements bounding them.")
+  }
+  
+  # Down-core porosity vector and covariance
+  
+  phi <- as.numeric(W %*% measured_phi_for_math)
+  
+  Sigma_phi <- W %*% Sigma_measured %*% t(W)
+  Sigma_phi <- (Sigma_phi + t(Sigma_phi)) / 2
+  
+  phi_uncertainty <- sqrt(pmax(diag(Sigma_phi), 0))
+  
+  zi_correction_table[section_rows, "Porosity"] <- phi
+  zi_correction_table[section_rows, "Porosity Uncertainty"] <- phi_uncertainty
+  
+  
+  # SURFACE POROSITY COVARIANCE
+  
+  if (measured_porosity != TRUE) {
+    
+    model_x <- model.matrix(best_model)
+    
+    regression_rows <- best_source_rows
+    
+    measured_section_lookup <- rep(NA_integer_, n_sections)
+    
+    if (n_direct > 0) {
+      for (i in seq_len(n_direct)) {
+        if (valid_measurement[i]) {
+          measured_section_lookup[i] <- i
+        }
+      }
+    }
+    
+    regression_measurement_index <- vapply(
+      regression_rows,
+      function(table_row) {
+        
+        section_index <- match(table_row, section_rows)
+        
+        if (is.na(section_index)) return(NA_integer_)
+        
+        measured_section_lookup[section_index]
+      },
+      integer(1)
+    )
+    
+    if (anyNA(regression_measurement_index) ||
+        any(regression_measurement_index < 1) ||
+        any(regression_measurement_index > n_measured)) {
+      stop("Regression rows do not map to valid measured porosity indices.")
+    }
+    
+    Sigma_regression_y <- diag(
+      measured_phi_sd[regression_measurement_index]^2
+    )
+    
+    # OLS coefficient weights
+    
+    A_ols <- solve(t(model_x) %*% model_x) %*% t(model_x)
+    
+    # Regression coefficient covariance
+    
+    Sigma_beta <- A_ols %*%
+      Sigma_regression_y %*%
+      t(A_ols)
+    
+    phi_0_variance <- Sigma_beta[1, 1]
+    phi_0_uncer <- sqrt(phi_0_variance)
+    
+    # Covariance between surface porosity and original measurements
+    
+    intercept_weights <- A_ols[1, ]
+    
+    Cov_phi0_regression_y <- as.numeric(
+      intercept_weights %*% Sigma_regression_y
+    )
+    
+    Cov_phi0_measured <- numeric(n_measured)
+    
+    Cov_phi0_measured[regression_measurement_index] <-
+      Cov_phi0_regression_y
+  }
+  
+  # Propagate surface porosity covariance through W
+  
+  Cov_phi0_phi <- as.numeric(W %*% Cov_phi0_measured)
+  
+  
+  # FULL INPUT COVARIANCE MATRIX
+  
+  Sigma_input <- matrix(
+    0,
+    nrow = n_sections + 1,
+    ncol = n_sections + 1
+  )
+  
+  Sigma_input[
+    seq_len(n_sections),
+    seq_len(n_sections)
+  ] <- Sigma_phi
+  
+  Sigma_input[
+    seq_len(n_sections),
+    n_sections + 1
+  ] <- Cov_phi0_phi
+  
+  Sigma_input[
+    n_sections + 1,
+    seq_len(n_sections)
+  ] <- Cov_phi0_phi
+  
+  Sigma_input[
+    n_sections + 1,
+    n_sections + 1
+  ] <- phi_0_variance
+  
+  Sigma_input <- (Sigma_input + t(Sigma_input)) / 2
+  #decompaction
+  # h'_i =
+  #
+  #       h_i (1 - phi_i)
+  #       -----------------
+  #          (1 - phi_0)
+  h <- as.numeric(zi_correction_table[section_rows,3])
+  # Corrected thickness
+  h_prime <-h *(1 - phi) /(1 - phi_0)
+  # Store
+  zi_correction_table[section_rows,"Uncompacted Section Thickness (cm)"] <-h_prime
+  # JACOBIAN OF CORRECTED THICKNESS
+  # Since h is exact:
+  #
+  # d h'_i / d phi_i
+  #
+  #       = -h_i / (1 - phi_0)
+  # d h'_i / d phi_0
+  #
+  #       = h'_i / (1 - phi_0)
+  J_hprime <- matrix(0,nrow = n_sections,ncol = n_sections + 1)
+  for (i in seq_len(n_sections)) {
+    J_hprime[i,i] <- -h[i] /(1 - phi_0)
+  }
+  # Every section depends on the common phi_0
+  J_hprime[,n_sections + 1] <- h_prime /(1 - phi_0)
+  #covariance of decompacted section thickness
+  Sigma_hprime <-J_hprime %*% Sigma_input %*% t(J_hprime)
+  Sigma_hprime <- (Sigma_hprime + t(Sigma_hprime)) / 2
+  #section thickness uncertainty
+  h_prime_uncertainty <- sqrt(pmax(diag(Sigma_hprime),0))
+  zi_correction_table[section_rows,"Uncompacted Section Thickness Uncertainty (cm)"] <-h_prime_uncertainty
+  #decompacted layer depths
+  z_prime <- numeric(n_sections)
+  z_prime[1] <- 0
+  if (n_sections > 1) {
+    z_prime[2:n_sections] <-cumsum(h_prime)[1:(n_sections - 1)]
+  }
+  # Assign top-of-interval depths to the corresponding boundary rows
+  zi_correction_table[top_rows[seq_len(n_sections)],
+                      "Uncompacted Top of Interval (cm)"] <- z_prime
+  # layer depths covariance
+  L <- matrix(0,nrow = n_sections,ncol = n_sections)
+  if (n_sections > 1) {
+    for (i in 2:n_sections) {
+      L[i,1:(i - 1)] <- 1
+    }
+  }
+  
+  Sigma_top <-L %*% Sigma_hprime %*% t(L)
+  Sigma_top <- (Sigma_top + t(Sigma_top)) / 2
+  #uncompacted layer depth uncertainty
+  z_prime_uncertainty <-sqrt(pmax(diag(Sigma_top),0))
+  zi_correction_table[top_rows[seq_len(n_sections)],
+                      "Uncompacted Top of Interval Uncertainty (cm)"] <- z_prime_uncertainty
+  #uncompacted midpoint depths
+  mid_prime <-z_prime +0.5 * h_prime
+  zi_correction_table[section_rows,"Uncompacted Mid-Depth (cm)"] <-mid_prime
+  #covariance of midpoints
+  # m' = z' + 0.5 h'
+  #       = M h'
+  M <- L
+  for (i in seq_len(n_sections)) {
+    M[i,i] <- 0.5
+  }
+  Sigma_mid <- M %*% Sigma_hprime %*% t(M)
+  Sigma_mid <- (Sigma_mid + t(Sigma_mid)) / 2
+  #midpoint depth uncertainty
+  mid_prime_uncertainty <- sqrt(pmax(diag(Sigma_mid),0))
+  zi_correction_table[section_rows,"Uncompacted Mid-Depth Uncertainty (cm)"] <- mid_prime_uncertainty
+  # SAVE COVARIANCE MATRICES AS ATTRIBUTES
+  # These are useful if the corrected depths are subsequently
+  # used in another uncertainty calculation.
+  attr(zi_correction_table,"Surface_Porosity") <- phi_0
+  attr(zi_correction_table,"Surface_Porosity_Uncertainty") <- phi_0_uncer
+  attr(zi_correction_table,"Cov_phi0_phi") <- Cov_phi0_phi
+  attr(zi_correction_table,"Porosity_Covariance") <- Sigma_phi
+  attr(zi_correction_table,"Corrected_Thickness_Covariance") <- Sigma_hprime
+  attr(zi_correction_table,"Corrected_TopDepth_Covariance") <- Sigma_top
+  attr(zi_correction_table,"Corrected_MidDepth_Covariance") <- Sigma_mid
+  folder_name_depth = "Depth Correction"
+  dir.create(folder_name_depth)
+  depth_corr_path <- file.path(folder_name_depth, "uncompacted_depth_table.xlsx")
+  write_xlsx(zi_correction_table, depth_corr_path)
+  if (exists("model_summaries_porosity")){
+  write_xlsx(model_summaries_porosity, path = "Depth Correction/porosity_model_summaries.xlsx")
+  }
+  }
+
 #start of SAZ auto detection
 SAZ_auto_detect=na.omit(concentrations_table[,6])
 SAZ_auto_detect=as.data.frame(SAZ_auto_detect)
@@ -1607,13 +2504,35 @@ SAZ_depth=0
   surface_table[,2]=na.omit(concentrations_table[,1])
   surface_table[,3]=na.omit(concentrations_table[,7])
   surface_table=as.data.frame(surface_table)
-  surface_table_plot=ggplot(surface_table, aes(x = x, y = y)) +
-    geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +
-    geom_point() +  # Add points
-    labs(title = "Excess Pb-210 vs Mid Depth", x = "Excess Pb-210 (dmp/g)", y ="Mid Depth (cm)") +  # Add labels
-    scale_x_continuous(breaks = seq(min(surface_table$x), max(surface_table$x), by = breaks_by_value(surface_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(surface_table[,3]))) +  # Set x-axis dynamically
-    scale_y_reverse(breaks = seq(min(surface_table$y), max(surface_table$y), by = 4)) +  # Set y-axis dynamically
-    theme_minimal()  # Use a minimal theme
+  surface_table_plot <- ggplot(
+    surface_table,
+    aes(x = x, y = y)
+  ) +
+    geom_errorbar(
+      aes(
+        xmin = x - x_uncertainty,
+        xmax = x + x_uncertainty
+      ),
+      width = 0.2
+    ) +
+    geom_point() +
+    labs(
+      title = "Excess Pb-210 vs Mid Depth",
+      x = "Excess Pb-210 (dpm/g)",
+      y = "Mid Depth (cm)"
+    ) +
+    dynamic_scale(
+      surface_table,
+      "x"
+    ) +
+    dynamic_scale(
+      surface_table,
+      "y",
+      axis = "y",
+      reverse = TRUE
+    ) +
+    theme_minimal()
+  
   print(surface_table_plot)
   attributes(surface_table)$na.action <- NULL
   print("check for surface active zone")
@@ -1631,7 +2550,7 @@ SAZ_depth=0
     # Create a temporary table for viewing
     temp_surface_table = surface_table[1:SAZ_view, 1:2]
     rownames(temp_surface_table) = as.character(seq(1, SAZ_view))
-    colnames(temp_surface_table) = c("Excess Pb-210 (dmp/g)", "Mid Depth (cm)")
+    colnames(temp_surface_table) = c("Excess Pb-210 (dpm/g)", "Mid Depth (cm)")
     attributes(temp_surface_table)$na.action <- NULL
     print(temp_surface_table)
     
@@ -1658,280 +2577,778 @@ SAZ_depth=0
     }
   }
 print("start of CFCS analysis")
-print("SAR modeling")
+print("MAR modeling")
 while (CFCS_modeling_complete==FALSE){
-  SAR_model_plot=ggplot(CFCS_table, aes(x = CFCS_table[, 1], y = CFCS_table[, 3])) +
-    geom_point(color = "blue", size = 2) +  # Customize point color and size
-    labs(x = "Mid Depth (cm)", y = "log-scale Excess Pb-210 Activity (dpm/g)", title = "SAR Modeling") +
-    scale_x_continuous(breaks = seq(0, max(CFCS_table[, 1]), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  #fix this
+  MAR_model_plot <- ggplot(
+    CFCS_table,
+    aes(
+      x = .data[[names(CFCS_table)[2]]],
+      y = .data[[names(CFCS_table)[3]]]
+    )
+  ) +
+    geom_point(
+      color = "blue",
+      size = 2
+    ) +
+    labs(
+      x = "Cumulative Mass Depth (g/cm^2)",
+      y = "log-scale Excess Pb-210 Activity (dpm/g)",
+      title = "MAR Modeling"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      names(CFCS_table)[2]
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      names(CFCS_table)[3],
+      axis = "y"
+    ) +
     theme_minimal() +
-    theme(plot.title = element_text(hjust = 0.5))  # Center the title
-  print(SAR_model_plot)
-  changepoint_detection_model = lm(`ln(Ci)` ~ zi, data = CFCS_table)
+    theme(
+      plot.title = element_text(hjust = 0.5)
+    )
+  
+  print(MAR_model_plot)
+  changepoint_detection_model = lm(`ln(Ci)` ~ mi, data = CFCS_table, na.action = na.exclude)
   number_of_models=as.numeric(readline(prompt = "How many models do you wish to try? "))
+  while(number_of_models>=nrow(CFCS_table)/3){
+    number_of_models=as.numeric(readline(prompt = "Too many models suggested! Enter lower number "))
+  }
   number_of_changepoints=number_of_models-1
   changepoint_list=c()
   if (number_of_changepoints>0){
     for (i in 1:number_of_changepoints){
-      changepoint_list[i]=as.numeric(readline(prompt = "Enter change-point "))
+      changepoint_list[i]=as.numeric(readline(prompt = "Enter cumulative mass depth change-point(s) "))
     }
-    segmented_model <- segmented(changepoint_detection_model, seg.Z = ~ zi, psi = list(zi = changepoint_list))
+    if (any(changepoint_list > CFCS_table[nrow(CFCS_table), 2])) {
+      print("Entered value(s) greater than maximum cumulative mass depth!")
+      changepoint_list[i]=as.numeric(readline(prompt = "Enter cumulative mass depth change-point(s) "))
+    }
+    segmented_model <- segmented(changepoint_detection_model, seg.Z = ~ mi, psi = list(mi = changepoint_list))
     estimated_breakpoints <- summary(segmented_model)$psi[, "Est."]
     estimated_breakpoints=unlist(estimated_breakpoints, use.names = FALSE)
-    SAR_indexes <- numeric(length(estimated_breakpoints))
+    MAR_indexes <- numeric(length(estimated_breakpoints))
     for (i in 1:length(estimated_breakpoints)) {
       
-      SAR_indexes[i]<- which.min(abs(CFCS_table[,1]-estimated_breakpoints[i]))
+      MAR_indexes[i]<- which.min(abs(CFCS_table[,2]-estimated_breakpoints[i]))
     }
     print("estimated change point(s)")
     print(estimated_breakpoints)
     extents=c(1)
-    extents <- c(extents, lapply(SAR_indexes, function(x) x))
+    extents <- c(extents, lapply(MAR_indexes, function(x) x))
     extents[length(extents)+1]=nrow(CFCS_table)
-    print("model data values")
+    print("nearest model data values")
     model_data_vals=c()
     for (i in 1:length(extents)){
-      model_data_vals[[i]]=CFCS_table[extents[[i]],1]
+      model_data_vals[[i]]=CFCS_table[extents[[i]],2]
     }
     cat(unlist(model_data_vals), sep = " ", fill=TRUE)
     print("model data indexes")
     list_of_models=c()
     extents <- unlist(extents, use.names = FALSE)
     print(extents)
-    for (i in 1:number_of_models){
-      list_of_models[[i]]=lm(CFCS_table[extents[i]:extents[i+1],3]~CFCS_table[extents[i]:extents[i+1],1])
-      print(paste("Model Adj. R square",i))
-      print(summary(list_of_models[[i]])$adj.r.square)
-      print(paste("Model SAR rate (cm/yr)",i))
-      print(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])
-      if ((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])<0){
-        print("model assumptions violated! Negative SAR generated, choose different SAR model fit")
+    for (i in 1:number_of_models) {
+      
+      list_of_models[[i]] <- lm(
+        CFCS_table[extents[i]:extents[i + 1], 3] ~
+          CFCS_table[extents[i]:extents[i + 1], 2],
+        na.action = na.exclude
+      )
+      
+      print(paste("Model Adj. R square", i))
+      print(summary(list_of_models[[i]])$adj.r.squared)
+      
+      print(paste("Model MAR (g/(cm^2 y))", i))
+      print(-decay_const / summary(list_of_models[[i]])$coefficients[2, 1])
+      
+      if (
+        (-decay_const /
+         summary(list_of_models[[i]])$coefficients[2, 1]) < 0
+      ) {
+        print(
+          "model assumptions violated! Negative MAR generated, choose different MAR model fit"
+        )
       }
-      SAR_model_plot + geom_line(aes(y = fitted(list_of_models[[i]])), color = i, linewidth = 1)
     }
-    lines_df <- data.frame()  # To hold all segments
+    
+    # Create data frame containing fitted lines
+    lines_df <- data.frame()
     
     for (i in seq_along(list_of_models)) {
+      
       model <- list_of_models[[i]]
-      model_data <- model$model
       
-      x_vals <- model_data[[2]]  # zi
-      y_vals <- fitted(model)    # fitted ln(Ci)
+      # Retrieve the full x-range for this model segment
+      x_vals <- CFCS_table[extents[i]:extents[i + 1], 2]
       
-      segment_df <- data.frame(x = x_vals, y = y_vals, group = as.factor(i))
+      # Extract the original regression coefficients
+      coefficients <- coef(model)
+      
+      # Calculate predicted y-values across the entire x-range
+      y_vals <- coefficients[1] + coefficients[2] * x_vals
+      
+      segment_df <- data.frame(
+        x = x_vals,
+        y = y_vals,
+        group = as.factor(i)
+      )
+      
+      # Retain all valid x-coordinates
+      segment_df <- segment_df[is.finite(segment_df$x), ]
+      
       lines_df <- rbind(lines_df, segment_df)
     }
-    print(ggplot(CFCS_table, aes(x = zi, y = `ln(Ci)`)) +
-            geom_point(color = "blue") +
-            labs(title = "SAR Modeling", x="Mid Depth (cm)", y="log-scale Excess Pb-210 Activity (dpm/g)") +
-            geom_line(data = lines_df, aes(x = x, y = y, group = group, color = group), linewidth = 1.2, show.legend = TRUE) +
-            labs(color = "Model"))
+    
+    # Create final MAR plot
+    MAR_model_plot <- ggplot(
+      CFCS_table,
+      aes(x = mi, y = `ln(Ci)`)
+    ) +
+      geom_point(
+        color = "blue"
+      ) +
+      geom_line(
+        data = lines_df,
+        aes(
+          x = x,
+          y = y,
+          group = group,
+          color = group
+        ),
+        linewidth = 1.2,
+        show.legend = TRUE
+      ) +
+      labs(
+        title = "MAR Modeling",
+        x = "Cumulative Mass Depth (g/cm^2)",
+        y = "log-scale Excess Pb-210 Activity (dpm/g)",
+        color = "Model"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        "mi"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        "ln(Ci)",
+        axis = "y"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5)
+      )
+    
+    print(MAR_model_plot)
   }else{
+    extents=c(1,nrow(CFCS_table))
     print("single model fit")
     print(summary(changepoint_detection_model)$adj.r.squared)
-    print(SAR_model_plot + geom_line(aes(y = fitted(changepoint_detection_model)), color = "red", linewidth = 1))
-    print("single model SAR rate (cm/yr)")
+    # Generate continuous fitted line
+    single_line_df <- data.frame(
+      mi = CFCS_table$mi,
+      fitted_y = coef(changepoint_detection_model)[1] +
+        coef(changepoint_detection_model)[2] * CFCS_table$mi
+    )
+    
+    single_line_df <- single_line_df[
+      is.finite(single_line_df$mi) &
+        is.finite(single_line_df$fitted_y), ]
+    
+    single_line_df <- single_line_df[
+      order(single_line_df$mi), ]
+    
+    print(
+      MAR_model_plot +
+        geom_line(
+          data = single_line_df,
+          aes(x = mi, y = fitted_y),
+          inherit.aes = FALSE,
+          color = "red",
+          linewidth = 1
+        )
+    )
+    print("single Model MAR (g/(cm^2 y))")
     print(-decay_const/summary(changepoint_detection_model)$coefficients[2, 1])
+    MAR_final_slope=summary(changepoint_detection_model)$coefficients[2, "Estimate"]
+    MAR_final_slope_err=summary(changepoint_detection_model)$coefficients[2, 2]
+    MAR_final=-decay_const/summary(changepoint_detection_model)$coefficients[2, 1]
+    MAR_final_err=(-decay_const/MAR_final_slope)*sqrt((MAR_final_slope_err/MAR_final_slope)^2+(decay_const_uncer/decay_const)^2)
     if ((-decay_const/summary(changepoint_detection_model)$coefficients[2, 1])<0){
-      print("model assumptions violated! Negative SAR generated, choose different SAR model fit")
+      print("model assumptions violated! Negative MAR generated, choose different MAR model fit")
     }
   }
   CFCS_manual_eval=readline(prompt = "Do you wish to manually set CFCS models? (True or False) ")
   if (CFCS_manual_eval==TRUE){
-    SAR_model_plot=ggplot(CFCS_table, aes(x = CFCS_table[, 1], y = CFCS_table[, 3])) +
-      geom_point(color = "blue", size = 2) +  # Customize point color and size
-      labs(x = "Mid Depth (cm)", y = "log-scale Excess Pb-210 Activity (dpm/g)", title = "SAR Modeling") +
-      scale_x_continuous(breaks = seq(0, max(CFCS_table[, 1]), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  #fix this
+    MAR_model_plot <- ggplot(
+      CFCS_table,
+      aes(
+        x = CFCS_table[, 2],
+        y = CFCS_table[, 3]
+      )
+    ) +
+      geom_point(
+        color = "blue",
+        size = 2
+      ) +
+      labs(
+        x = "Cumulative Mass Depth (g/cm^2)",
+        y = "log-scale Excess Pb-210 Activity (dpm/g)",
+        title = "MAR Modeling"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        names(CFCS_table)[2]
+      ) +
       theme_minimal() +
-      theme(plot.title = element_text(hjust = 0.5))  # Center the title
-    print(SAR_model_plot)
-    changepoint_detection_model = lm(`ln(Ci)` ~ zi, data = CFCS_table)
+      theme(
+        plot.title = element_text(hjust = 0.5)
+      )
+    
+    print(MAR_model_plot)
+    
+    
+    changepoint_detection_model = lm(`ln(Ci)` ~ mi, data = CFCS_table, na.action=na.exclude)
     number_of_models=as.numeric(readline(prompt = "How many models do you wish to try? "))
+    while(number_of_models>=nrow(CFCS_table)/3){
+      number_of_models=as.numeric(readline(prompt = "Too many models suggested! Enter lower number "))
+    }
     number_of_changepoints=number_of_models-1
     changepoint_list=c()
     if (number_of_changepoints>0){
       for (i in 1:number_of_changepoints){
-        changepoint_list[i]=as.numeric(readline(prompt = "Enter change-point "))
+        changepoint_list[i]=as.numeric(readline(prompt = "Enter change-point indices "))
       }
       
     }
     extents=c(1, changepoint_list, length(CFCS_table[,1]))
     print("model data indexes")
     print(extents)
-    print("model data values (cm)")
-    model_data_vals=c()
-    for (i in 1:length(extents)){
-      model_data_vals[[i]]=CFCS_table[extents[[i]],1]
+    print("model data values (g/cm^2)")
+    model_data_vals <- numeric(length(extents))
+    
+    for (i in seq_along(extents)) {
+      model_data_vals[i] <- CFCS_table[extents[i], 2]
     }
+    
     print(model_data_vals)
     list_of_models=c()
     for (i in 1:number_of_models){
-      list_of_models[[i]]=lm(CFCS_table[extents[i]:extents[i+1],3]~CFCS_table[extents[i]:extents[i+1],1])
+      list_of_models[[i]]=lm(CFCS_table[extents[i]:extents[i+1],3]~CFCS_table[extents[i]:extents[i+1],2], na.action=na.exclude)
       print(paste("Model Adj. R square",i))
       print(summary(list_of_models[[i]])$adj.r.square)
-      print(paste("Model SAR rate (cm/yr)",i))
+      print(paste("Model MAR (g/(cm^2 y))",i))
       print(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])
-      SAR_model_plot + geom_line(aes(y = fitted(list_of_models[[i]])), color = i, linewidth = 1)
+      MAR_model_plot + geom_line(aes(y = fitted(list_of_models[[i]])), color = i, linewidth = 1)
     }
-    lines_df <- data.frame()  # To hold all segments
+    # Create data frame containing fitted lines
+    lines_df <- data.frame()
     
     for (i in seq_along(list_of_models)) {
+      
       model <- list_of_models[[i]]
-      model_data <- model$model
       
-      x_vals <- model_data[[2]]  # zi
-      y_vals <- fitted(model)    # fitted ln(Ci)
+      # Retrieve the full x-range for this model segment
+      x_vals <- CFCS_table[extents[i]:extents[i + 1], 2]
       
-      segment_df <- data.frame(x = x_vals, y = y_vals, group = as.factor(i))
+      # Extract the original regression coefficients
+      coefficients <- coef(model)
+      
+      # Calculate predicted y-values across the entire x-range
+      y_vals <- coefficients[1] + coefficients[2] * x_vals
+      
+      segment_df <- data.frame(
+        x = x_vals,
+        y = y_vals,
+        group = as.factor(i)
+      )
+      
+      # Retain all valid x-coordinates
+      segment_df <- segment_df[is.finite(segment_df$x), ]
+      
       lines_df <- rbind(lines_df, segment_df)
     }
-    print(ggplot(CFCS_table, aes(x = zi, y = `ln(Ci)`)) +
-            geom_point(color = "blue") +
-            labs(title = "SAR Modeling", x="Mid Depth (cm)", y="log-scale Excess Pb-210 Activity (dpm/g)") +
-            geom_line(data = lines_df, aes(x = x, y = y, group = group, color = group), linewidth = 1.2, show.legend = TRUE) +
-            labs(color = "Model"))
+    
+    MAR_model_plot <- ggplot(
+      CFCS_table,
+      aes(x = mi, y = `ln(Ci)`)
+    ) +
+      geom_point(
+        color = "blue"
+      ) +
+      geom_line(
+        data = lines_df,
+        aes(
+          x = x,
+          y = y,
+          group = group,
+          color = group
+        ),
+        linewidth = 1.2,
+        show.legend = TRUE
+      ) +
+      labs(
+        title = "MAR Modeling",
+        x = "Cumulative Mass Depth (g/cm^2)",
+        y = "log-scale Excess Pb-210 Activity (dpm/g)",
+        color = "Model"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        "mi"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        "ln(Ci)",
+        axis = "y"
+      ) +
+      theme_minimal()
+    
+    print(MAR_model_plot)
   }
   CFCS_modeling_complete=readline(prompt = "Do you wish to accept current CFCS model(s)? (True or False) ")
 }
+print("SAR modeling")
 
-print("MAR modeling")
-MAR_model_plot=ggplot(CFCS_table, aes(x = CFCS_table[, 2], y = CFCS_table[, 3])) +
-  geom_point(color = "blue", size = 2) +  # Customize point color and size
-  labs(x = "Cumulative Mass Depth (g/cm^2)", y = "log-scale Excess Pb-210 Activity (dpm/g)", title = "MAR Modeling") +
-  scale_x_continuous(breaks = seq(0, max(CFCS_table[, 2]), by = 1)) +  # Set x-axis breaks
+if (surface_active_zone_check==TRUE){
+  for (i in 1:length(extents)){
+    extents[i]=extents[i]+SAZ_depth-1
+    fixer_var=0
+  }
+}else{
+  fixer_var=1
+}
+SAR_model_plot <- ggplot(
+  CFCS_table,
+  aes(
+    x = CFCS_table[, 1],
+    y = CFCS_table[, 3]
+  )
+) +
+  geom_point(
+    color = "blue",
+    size = 2
+  ) +
+  labs(
+    x = "Mid Depth (cm)",
+    y = "log-scale Excess Pb-210 Activity (dpm/g)",
+    title = "SAR Modeling"
+  ) +
+  dynamic_scale(
+    CFCS_table,
+    names(CFCS_table)[1]
+  ) +
   theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))  # Center the title
-print(MAR_model_plot)
-changepoint_detection_model_MAR = lm(`ln(Ci)` ~ mi, data = CFCS_table)
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(SAR_model_plot)
+changepoint_detection_model_SAR = lm(`ln(Ci)` ~ zi, data = CFCS_table, na.action=na.exclude)
 
 if (number_of_changepoints>0){
-  list_of_models_MAR=c()
-  print("model data values")
-  model_data_vals_MAR=c()
+  model_data_vals_SAR=c()
   for (i in 1:length(extents)){
-    model_data_vals_MAR[[i]]=CFCS_table[extents[[i]],2]
+    model_data_vals_SAR[[i]]=CFCS_table[(extents[[i]]-(SAZ_depth-1+fixer_var)),1]
   }
-  cat(unlist(model_data_vals_MAR), sep = " ", fill=TRUE)
+  cat(unlist(model_data_vals_SAR), sep = " ", fill=TRUE)
   print("model data indexes")
   print(extents)
+  list_of_models_SAR= vector("list", number_of_models)
   for (i in 1:number_of_models){
-    list_of_models_MAR[[i]]=lm(CFCS_table[extents[i]:extents[i+1],3]~CFCS_table[extents[i]:extents[i+1],2])
+    list_of_models_SAR[[i]]=lm(CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),3]~CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),1], na.action=na.exclude)
     print(paste("Model Adj. R square",i))
-    print(summary(list_of_models_MAR[[i]])$adj.r.square)
-    print(paste("Model MAR rate (g/(cm^2 yr)",i))
-    print(-decay_const/summary(list_of_models_MAR[[i]])$coefficients[2, 1])
-    MAR_model_plot + geom_line(aes(y = fitted(list_of_models_MAR[[i]])), color = i, linewidth = 1)
+    print(summary(list_of_models_SAR[[i]])$adj.r.square)
+    print(paste("Model SAR (g/(cm^2 yr)",i))
+    print(-decay_const/summary(list_of_models_SAR[[i]])$coefficients[2, 1])
+    SAR_model_plot + geom_line(aes(y = fitted(list_of_models_SAR[[i]])), color = i, linewidth = 1)
   }
-  lines_df_MAR <- data.frame()  # To hold all segments
+  lines_df_SAR <- data.frame()
   
-  for (i in seq_along(list_of_models_MAR)) {
-    model_MAR <- list_of_models_MAR[[i]]
-    model_data_MAR <- model_MAR$model
+  for (i in seq_along(list_of_models_SAR)) {
     
-    x_vals_MAR <- model_data_MAR[[2]]  # mi
-    y_vals_MAR <- fitted(model_MAR)    # fitted ln(Ci)
+    model_SAR <- list_of_models_SAR[[i]]
     
-    segment_df_MAR <- data.frame(x = x_vals_MAR, y = y_vals_MAR, group = as.factor(i))
-    lines_df_MAR <- rbind(lines_df_MAR, segment_df_MAR)
+    x_vals_SAR <- CFCS_table[
+      (extents[i]-(SAZ_depth-1+fixer_var)):
+        (extents[i+1]-(SAZ_depth-1+fixer_var)),
+      1
+    ]
+    
+    coefficients <- coef(model_SAR)
+    
+    y_vals_SAR <- coefficients[1] +
+      coefficients[2] * x_vals_SAR
+    
+    segment_df_SAR <- data.frame(
+      x = x_vals_SAR,
+      y = y_vals_SAR,
+      group = as.factor(i)
+    )
+    
+    segment_df_SAR <- segment_df_SAR[
+      is.finite(segment_df_SAR$x), ]
+    
+    lines_df_SAR <- rbind(lines_df_SAR, segment_df_SAR)
   }
-  print(ggplot(CFCS_table, aes(x = mi, y = `ln(Ci)`)) +
-          geom_point(color = "blue") +
-          labs(title = "MAR Modeling", x="Cumulative Mass Depth (g/cm^2)", y="log-scale Pb-210 Activity (dpm/g)") +
-          geom_line(data = lines_df_MAR, aes(x = x, y = y, group = group, color = group), linewidth = 1.2, show.legend = TRUE) +
-          labs(color = "Model"))
+  
+  SAR_model_plot <- ggplot(
+    CFCS_table,
+    aes(x = zi, y = `ln(Ci)`)
+  ) +
+    geom_point(
+      color = "blue"
+    ) +
+    geom_line(
+      data = lines_df_SAR,
+      aes(
+        x = x,
+        y = y,
+        group = group,
+        color = group
+      ),
+      linewidth = 1.2,
+      show.legend = TRUE
+    ) +
+    labs(
+      title = "SAR Modeling",
+      x = "Mid Depth (cm)",
+      y = "log-scale Pb-210 Activity (dpm/g)",
+      color = "Model"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "zi"
+    ) +
+    theme_minimal()
+  
+  print(SAR_model_plot)
   
 }else{
   print("single model fit")
-  print(summary(changepoint_detection_model_MAR)$adj.r.squared)
-  print("single model MAR rate (g/(cm^2 yr)")
-  print(-decay_const/summary(changepoint_detection_model_MAR)$coefficients[2, 1])
-  print(MAR_model_plot + geom_line(aes(y = fitted(changepoint_detection_model)), color = "red", linewidth = 1))
+  print(summary(changepoint_detection_model_SAR)$adj.r.squared)
+  print("single model SAR (cm/yr)")
+  print(-decay_const/summary(changepoint_detection_model_SAR)$coefficients[2, 1])
+  # Generate continuous fitted line
+  single_line_df_SAR <- data.frame(
+    zi = CFCS_table$zi,
+    fitted_y = coef(changepoint_detection_model_SAR)[1] +
+      coef(changepoint_detection_model_SAR)[2] * CFCS_table$zi
+  )
+  
+  single_line_df_SAR <- single_line_df_SAR[
+    is.finite(single_line_df_SAR$zi) &
+      is.finite(single_line_df_SAR$fitted_y), ]
+  
+  single_line_df_SAR <- single_line_df_SAR[
+    order(single_line_df_SAR$zi), ]
+  
+  print(
+    SAR_model_plot +
+      geom_line(
+        data = single_line_df_SAR,
+        aes(x = zi, y = fitted_y),
+        inherit.aes = FALSE,
+        color = "red",
+        linewidth = 1
+      )
+  )
   
 }
+if (number_of_models==1){
+  extents=c(1,nrow(CFCS_table))
+}
+
+if (exists("zi_correction_table")){
+  print("Uncompacted SAR modeling")
+  CFCS_table$`Uncompacted Mid-Depth (cm)`=na.omit(zi_correction_table[(SAZ_depth*2):nrow(zi_correction_table),"Uncompacted Mid-Depth (cm)"])
+  ccSAR_model_plot <- ggplot(
+    CFCS_table,
+    aes(
+      x = `Uncompacted Mid-Depth (cm)`,
+      y = `ln(Ci)`
+    )
+  ) +
+    geom_point(
+      color = "blue",
+      size = 2
+    ) +
+    labs(
+      x = "Uncompacted Mid Depth (cm)",
+      y = "log-scale Excess Pb-210 Activity (dpm/g)",
+      title = "Uncompacted ccSAR Modeling"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "Uncompacted Mid-Depth (cm)"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "ln(Ci)",
+      axis = "y"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5)
+    )
+  
+  print(ccSAR_model_plot)
+  changepoint_detection_model_ccSAR = lm(`ln(Ci)` ~ `Uncompacted Mid-Depth (cm)`, data = CFCS_table, na.action=na.exclude)
+  
+  if (number_of_changepoints>0){
+    list_of_models_ccSAR=c()
+    print("model data values")
+    model_data_vals_ccSAR=c()
+    for (i in 1:length(extents)){
+      model_data_vals_ccSAR[[i]]=CFCS_table[(extents[[i]]-(SAZ_depth-1+fixer_var)),7]
+    }
+    cat(unlist(model_data_vals_ccSAR), sep = " ", fill=TRUE)
+    print("model data indexes")
+    print(extents)
+    for (i in 1:number_of_models){
+      list_of_models_ccSAR[[i]]=lm(CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),3]~CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),7], na.action=na.exclude)
+      print(paste("Model Adj. R square",i))
+      print(summary(list_of_models_ccSAR[[i]])$adj.r.square)
+      print(paste("Model ccSAR (g/(cm^2 yr)",i))
+      print(-decay_const/summary(list_of_models_ccSAR[[i]])$coefficients[2, 1])
+      ccSAR_model_plot + geom_line(aes(y = fitted(list_of_models_ccSAR[[i]])), color = i, linewidth = 1)
+    }
+    lines_df_ccSAR <- data.frame()
+    
+    for (i in seq_along(list_of_models_ccSAR)) {
+      
+      model_ccSAR <- list_of_models_ccSAR[[i]]
+      
+      x_vals_ccSAR <- CFCS_table[
+        (extents[i]-(SAZ_depth-1+fixer_var)):
+          (extents[i+1]-(SAZ_depth-1+fixer_var)),
+        7
+      ]
+      
+      coefficients <- coef(model_ccSAR)
+      
+      y_vals_ccSAR <- coefficients[1] +
+        coefficients[2] * x_vals_ccSAR
+      
+      segment_df_ccSAR <- data.frame(
+        x = x_vals_ccSAR,
+        y = y_vals_ccSAR,
+        group = as.factor(i)
+      )
+      
+      segment_df_ccSAR <- segment_df_ccSAR[
+        is.finite(segment_df_ccSAR$x) &
+          is.finite(segment_df_ccSAR$y), ]
+      
+      lines_df_ccSAR <- rbind(
+        lines_df_ccSAR,
+        segment_df_ccSAR
+      )
+    }
+    
+    ccSAR_model_plot <- ggplot(
+      CFCS_table,
+      aes(x = `Uncompacted Mid-Depth (cm)`, y = `ln(Ci)`)
+    ) +
+      geom_point(
+        color = "blue"
+      ) +
+      geom_line(
+        data = lines_df_ccSAR,
+        aes(
+          x = x,
+          y = y,
+          group = group,
+          color = group
+        ),
+        linewidth = 1.2,
+        show.legend = TRUE
+      ) +
+      labs(
+        title = " Uncompacted SAR Modeling",
+        x = "Mid Depth (cm)",
+        y = "log-scale Pb-210 Activity (dpm/g)",
+        color = "Model"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        "Uncompacted Mid-Depth (cm)"
+      ) +
+      theme_minimal()
+    
+    print(ccSAR_model_plot)
+
+  }else{
+    print("single model fit")
+    print(summary(changepoint_detection_model_ccSAR)$adj.r.squared)
+    print("single model Uncompacted SAR (cm/yr)")
+    print(-decay_const/summary(changepoint_detection_model_ccSAR)$coefficients[2, 1])
+    # Generate continuous fitted line
+    single_line_df_ccSAR <- data.frame(
+      x = CFCS_table$`Uncompacted Mid-Depth (cm)`,
+      fitted_y = coef(changepoint_detection_model_ccSAR)[1] +
+        coef(changepoint_detection_model_ccSAR)[2] *
+        CFCS_table$`Uncompacted Mid-Depth (cm)`
+    )
+    
+    single_line_df_ccSAR <- single_line_df_ccSAR[
+      is.finite(single_line_df_ccSAR$x) &
+        is.finite(single_line_df_ccSAR$fitted_y), ]
+    
+    single_line_df_ccSAR <- single_line_df_ccSAR[
+      order(single_line_df_ccSAR$x), ]
+    
+    print(
+      ccSAR_model_plot +
+        geom_line(
+          data = single_line_df_ccSAR,
+          aes(x = x, y = fitted_y),
+          inherit.aes = FALSE,
+          color = "red",
+          linewidth = 1
+        )
+    )
+    
+  }
+  if (number_of_models==1){
+    extents=c(1,nrow(CFCS_table))
+  }
+}
+depth_correct=0
+if (surface_active_zone_check==TRUE) {
+  depth_correct=SAZ_depth-1
+}
+
+model_transition_age_catch=numeric(nrow(CFCS_table))
 #populate CFCS table
 if (number_of_models>1){
   time_correction=0
   for (i in 1:length(list_of_models)){
     for (j in extents[i]:(extents[i+1])){
-      if (i==1){
-        CFCS_table[j,4]=(CFCS_table[j,1]-CFCS_table[extents[i],1])/(-decay_const/(summary(list_of_models[[i]])$coefficients[2, "Estimate"]))+time_correction
-        CFCS_table[j,5]=numeric_date-CFCS_table[j,4]
+      if (time_correction==0){
+        CFCS_table[(j-extents[1]+1),4]=(CFCS_table[(j-extents[1]+1),2]-CFCS_table[(extents[i]-depth_correct),2])/(-decay_const/(summary(list_of_models[[i]])$coefficients[2, "Estimate"]))+time_correction
+        CFCS_table[(j-extents[1]+1),5]=numeric_date-CFCS_table[(j-extents[1]+1),4]
+        model_transition_age_catch[(j-extents[1]+1)]=(CFCS_table[(j-extents[1]+1),2]-CFCS_table[(extents[i]-depth_correct),2])/(-decay_const/(summary(list_of_models[[i]])$coefficients[2, "Estimate"]))
       }else{
-        CFCS_table[j,4]=(CFCS_table[j,1]-CFCS_table[(extents[i]-1),1])/(-decay_const/(summary(list_of_models[[i]])$coefficients[2, "Estimate"]))+time_correction
-        CFCS_table[j,5]=numeric_date-CFCS_table[j,4]
+        CFCS_table[(j-extents[1]+1),4]=(CFCS_table[(j-extents[1]+1),2]-CFCS_table[(extents[i]-depth_correct-1),2])/(-decay_const/(summary(list_of_models[[i]])$coefficients[2, "Estimate"]))+time_correction
+        CFCS_table[(j-extents[1]+1),5]=numeric_date-CFCS_table[(j-extents[1]+1),4]
+        model_transition_age_catch[(j-extents[1]+1)]=(CFCS_table[(j-extents[1]+1),2]-CFCS_table[(extents[i]-depth_correct-1),2])/(-decay_const/(summary(list_of_models[[i]])$coefficients[2, "Estimate"]))
       }
       if (j>=extents[i+1]-1 && j+1!=extents[i+1]){
-        time_correction=CFCS_table[j-1,4]
+        time_correction=CFCS_table[(j-extents[1]),4]
       }
     }
   }
 }else{
-  for (i in 1:nrow(CFCS_table)){
-    CFCS_table[i,4]=(CFCS_table[i,1]-CFCS_table[1,1])/(-decay_const/(summary(changepoint_detection_model)$coefficients[2, "Estimate"]))
-    CFCS_table[i,5]=numeric_date-CFCS_table[i,4]
+  for (i in extents[1]:extents[2]){
+    CFCS_table[(i-extents[1]+1),4]=(CFCS_table[(i-extents[1]+1),2]-CFCS_table[1,2])/(-decay_const/(summary(changepoint_detection_model)$coefficients[2, "Estimate"]))
+    CFCS_table[(i-extents[1]+1),5]=numeric_date-CFCS_table[(i-extents[1]+1),4]
   }
 }
+
 # calculate the age uncertainty
+#find the age uncertainty for each overlying model
+all_transition_age_unc_cont=numeric(number_of_changepoints)
+if(exists("list_of_models")==FALSE){
+  to_model_num=1
+}else{
+  to_model_num=length(list_of_models)
+}
+for (i in 1:to_model_num){
+  for (j in extents[i]:extents[i+1] )
+    if (j %in% (extents[-c(1, length(extents))] - 1)) {
+      all_transition_age_unc_cont[i]=model_transition_age_catch[(j-extents[1]+1)]
+      all_transition_age_unc_cont[i]=all_transition_age_unc_cont[i]*((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])*sqrt(((-summary(list_of_models[[i]])$coefficients[2, 2])/(summary(list_of_models[[i]])$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1]))
+    }
+}
+all_transition_age_unc_cont=all_transition_age_unc_cont^2
+
 if (number_of_models>=2){
-for (i in 1:number_of_models){
-  for (j in extents[[i]]:extents[[i+1]]){
-    CFCS_table[j,6]=CFCS_table[j,4]*((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])*sqrt(((-summary(list_of_models[[i]])$coefficients[2, 2])/(summary(list_of_models[[i]])$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1]))
+  for (i in 1:number_of_models){
+    for (j in extents[[i]]:extents[[i+1]]){
+      if (j==extents[1]){
+        CFCS_table[(j-extents[1]+1),6]=0
+      }else{
+        if (i==1){
+          CFCS_table[(j-extents[1]+1),6]=model_transition_age_catch[(j-extents[1]+1)]*((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])*sqrt(((-summary(list_of_models[[i]])$coefficients[2, 2])/(summary(list_of_models[[i]])$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1]))
+        }else{
+          CFCS_table[(j-extents[1]+1),6]=sqrt(sum(all_transition_age_unc_cont[1:(i-1)])+(model_transition_age_catch[(j-extents[1]+1)]*((-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])*sqrt(((-summary(list_of_models[[i]])$coefficients[2, 2])/(summary(list_of_models[[i]])$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])))^2)
+        }
+      }
+    }
   }
-}
 }else{ 
-  for (i in 1:nrow(CFCS_table)){
-    CFCS_table[i,6]=CFCS_table[i,4]*((-decay_const/summary(changepoint_detection_model)$coefficients[2, 1])*sqrt(((-summary(changepoint_detection_model)$coefficients[2, 2])/(summary(changepoint_detection_model)$coefficients[2,1]))^2+(decay_const_uncer/decay_const)^2)/(-decay_const/summary(changepoint_detection_model)$coefficients[2, 1]))
+  for (i in extents[1]:extents[2]){
+    if (i==extents[1]){
+      CFCS_table[(i-extents[1]+1),6]=0
+    }else{
+      CFCS_table[(i-extents[1]+1),6]=CFCS_table[(i-extents[1]+1),4]*(MAR_final_err/MAR_final)
+    }
   }
 }
+
+if(surface_active_zone_check==TRUE){
+  has_known_age=readline(prompt = "Does one of your intervals have an independent age marker? (TRUE or FALSE) ")
+    if (has_known_age==TRUE){
+      known_age_depth=as.numeric(readline(prompt = "Enter marker depth (cm) "))
+      known_age_CE=as.numeric(readline(prompt = "Enter marker age (CE) "))
+      index <- which(CFCS_table$zi == known_age_depth)
+      top_age=known_age_CE+CFCS_table[index,"Time yr"]
+      CFCS_table[1,"Date (CE)"]=top_age
+      for (i in 2:nrow(CFCS_table)){
+        CFCS_table[i,"Date (CE)"]=top_age-CFCS_table[i,"Time yr"]
+      }
+    }
+}
+
 
 folder_name2 = "CFCS modeling data"
 dir.create(folder_name2)
 CFCS_table_path <- file.path(folder_name2, "CFCS_table.xlsx")
-colnames(CFCS_table)[c(1, 2, 3, 5)] <- c("Mid Depth zi cm", "Mass Depth Section mi gcm^-2", "log-scale Excess Pb-210 ln(Ci) dmp/g", "Date CE")
+colnames(CFCS_table)[c(1, 2, 3, 5)] <- c("Mid Depth zi cm", "Mass Depth Section mi gcm^-2", "log-scale Excess Pb-210 ln(Ci) dpm/g", "Date CE")
 write_xlsx(as.data.frame(CFCS_table), CFCS_table_path)
-colnames(CFCS_table)[c(1, 2, 3, 5)] <- c("zi","mi","ln(Ci)", "Date (yr)")
+colnames(CFCS_table)[c(1, 2, 3, 5)] <- c("zi","mi","ln(Ci)", "Date (CE)")
 # save the MAR/SAR rates and uncertainties to files
 #MAR version
 rownames_MAR_rates=c()
 if (number_of_models==1){
-MAR_rates = array(data=NA, dim=c(1, 2),dimnames=list(NULL, c("MAR (g/(cm^2 yr)", "uncertainty")))
-MAR_rates[1,1]=-decay_const/summary(changepoint_detection_model_MAR)$coefficients[2, 1]
-MAR_rates[1,2]=MAR_rates[1,1]*sqrt((-summary(changepoint_detection_model_MAR)$coefficients[2, 2]/summary(changepoint_detection_model_MAR)$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
-rownames(MAR_rates)=c("single model")
+  MAR_rates = array(data=NA, dim=c(1, 2),dimnames=list(NULL, c("MAR (g/(cm^2 yr)", "uncertainty")))
+  MAR_rates[1,1]=-decay_const/summary(changepoint_detection_model)$coefficients[2, 1]
+  MAR_rates[1,2]=MAR_rates[1,1]*sqrt((-summary(changepoint_detection_model)$coefficients[2, 2]/summary(changepoint_detection_model)$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
+  rownames(MAR_rates)=c("single model")
 }else{
-MAR_rates = array(data=NA, dim=c(length(list_of_models), 2),dimnames=list(NULL, c("MAR (g/(cm^2 yr)", "uncertainty")))
-for ( i in 1:length(list_of_models)){
-  MAR_rates[i,1]=-decay_const/summary(list_of_models_MAR[[i]])$coefficients[2, 1]
-  MAR_rates[i,2]=MAR_rates[i,1]*sqrt((-summary(list_of_models_MAR[[i]])$coefficients[2, 2]/summary(list_of_models_MAR[[i]])$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
-  rownames_MAR_rates[i]=paste("Model",i)
-}
-rownames(MAR_rates)=rownames_MAR_rates
+  MAR_rates = array(data=NA, dim=c(length(list_of_models), 2),dimnames=list(NULL, c("MAR (g/(cm^2 yr)", "uncertainty")))
+  for ( i in 1:length(list_of_models)){
+    MAR_rates[i,1]=-decay_const/summary(list_of_models[[i]])$coefficients[2, 1]
+    MAR_rates[i,2]=MAR_rates[i,1]*sqrt((-summary(list_of_models[[i]])$coefficients[2, 2]/summary(list_of_models[[i]])$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
+    rownames_MAR_rates[i]=paste("Model",i)
+  }
+  rownames(MAR_rates)=rownames_MAR_rates
 }
 MAR_rates_path <- file.path(folder_name2, "MAR_rates.xlsx")
 if (number_of_models>1){
-  MAR_final_slope=summary(list_of_models_MAR[[length(list_of_models_MAR)]])$coefficients[2, "Estimate"]
-  MAR_final_slope_err=summary(list_of_models_MAR[[length(list_of_models_MAR)]])$coefficients[2, 2]
+  MAR_final_slope=summary(list_of_models[[length(list_of_models)]])$coefficients[2, "Estimate"]
+  MAR_final_slope_err=summary(list_of_models[[length(list_of_models)]])$coefficients[2, 2]
 }else{
-  MAR_final_slope=summary(changepoint_detection_model_MAR)$coefficients[2, "Estimate"]
-  MAR_final_slope_err=summary(changepoint_detection_model_MAR)$coefficients[2, 2]
+  MAR_final_slope=summary(changepoint_detection_model)$coefficients[2, "Estimate"]
+  MAR_final_slope_err=summary(changepoint_detection_model)$coefficients[2, 2]
 }
 
 write_xlsx(as.data.frame(MAR_rates), MAR_rates_path)
-missing_inventory=(concentrations_table[(nrow(concentrations_table)),6]*(-decay_const/MAR_final_slope))/decay_const
 MAR_final=(-decay_const/MAR_final_slope)
 MAR_final_err=(-decay_const/MAR_final_slope)*sqrt((MAR_final_slope_err/MAR_final_slope)^2+(decay_const_uncer/decay_const)^2)
 #SAR version
 rownames_SAR_rates=c()
 if (number_of_models==1){
   SAR_rates = array(data=NA, dim=c(1, 2),dimnames=list(NULL, c("SAR (cm/yr)", "uncertainty")))
-  SAR_rates[1,1]=-decay_const/summary(changepoint_detection_model)$coefficients[2, 1]
-  SAR_rates[1,2]=SAR_rates[1,1]*sqrt((-summary(changepoint_detection_model)$coefficients[2, 2]/summary(changepoint_detection_model)$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
+  SAR_rates[1,1]=-decay_const/summary(changepoint_detection_model_SAR)$coefficients[2, 1]
+  SAR_rates[1,2]=SAR_rates[1,1]*sqrt((-summary(changepoint_detection_model_SAR)$coefficients[2, 2]/summary(changepoint_detection_model_SAR)$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
   rownames(SAR_rates)=c("single model")
 }else{
-  SAR_rates = array(data=NA, dim=c(length(list_of_models), 2),dimnames=list(NULL, c("SAR (cm/yr)", "uncertainty")))
+  SAR_rates = array(data=NA, dim=c(length(list_of_models_SAR), 2),dimnames=list(NULL, c("SAR (cm/yr)", "uncertainty")))
   for ( i in 1:length(list_of_models)){
-    SAR_rates[i,1]=-decay_const/summary(list_of_models[[i]])$coefficients[2, 1]
-    SAR_rates[i,2]=SAR_rates[i,1]*sqrt((-summary(list_of_models[[i]])$coefficients[2, 2]/summary(list_of_models[[i]])$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
+    SAR_rates[i,1]=-decay_const/summary(list_of_models_SAR[[i]])$coefficients[2, 1]
+    SAR_rates[i,2]=SAR_rates[i,1]*sqrt((-summary(list_of_models_SAR[[i]])$coefficients[2, 2]/summary(list_of_models_SAR[[i]])$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
     rownames_SAR_rates[i]=paste("Model",i)
   }
   rownames(SAR_rates)=rownames_SAR_rates
@@ -1939,9 +3356,30 @@ if (number_of_models==1){
 SAR_rates_path <- file.path(folder_name2, "SAR_rates.xlsx")
 write_xlsx(as.data.frame(SAR_rates), SAR_rates_path)
 
+#ccSAR version
+if (exists("zi_correction_table")){
+  rownames_ccSAR_rates=c()
+  if (number_of_models==1){
+    ccSAR_rates = array(data=NA, dim=c(1, 2),dimnames=list(NULL, c("ccSAR (cm/yr)", "uncertainty")))
+    ccSAR_rates[1,1]=-decay_const/summary(changepoint_detection_model_ccSAR)$coefficients[2, 1]
+    ccSAR_rates[1,2]=ccSAR_rates[1,1]*sqrt((-summary(changepoint_detection_model_ccSAR)$coefficients[2, 2]/summary(changepoint_detection_model_ccSAR)$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
+    rownames(ccSAR_rates)=c("single model")
+  }else{
+    ccSAR_rates = array(data=NA, dim=c(length(list_of_models_ccSAR), 2),dimnames=list(NULL, c("ccSAR (cm/yr)", "uncertainty")))
+    for ( i in 1:length(list_of_models)){
+      ccSAR_rates[i,1]=-decay_const/summary(list_of_models_ccSAR[[i]])$coefficients[2, 1]
+      ccSAR_rates[i,2]=ccSAR_rates[i,1]*sqrt((-summary(list_of_models_ccSAR[[i]])$coefficients[2, 2]/summary(list_of_models_ccSAR[[i]])$coefficients[2, 1])^2+(decay_const_uncer/decay_const)^2)
+      rownames_ccSAR_rates[i]=paste("Model",i)
+    }
+    rownames(ccSAR_rates)=rownames_ccSAR_rates
+  }
+  ccSAR_rates_path <- file.path(folder_name2, "ccSAR_rates.xlsx")
+  write_xlsx(as.data.frame(ccSAR_rates), ccSAR_rates_path)
+}
+
 ##save changepoint models, if they are used
 if (number_of_models==1){
-  SAR_model_summary <- data.frame(Model = character(),
+  MAR_model_summary <- data.frame(Model = character(),
                                   Coefficient = character(),
                                   Estimate = numeric(),
                                   Std.Error = numeric(),
@@ -1957,50 +3395,9 @@ if (number_of_models==1){
     # Extract coefficients
     coefficients <- summary_model$coefficients
     for (i in 1:nrow(coefficients)) {
-      SAR_model_summary <- rbind(SAR_model_summary, 
-                                 data.frame(Model = "Single Model",
-                                            Coefficient = rownames(coefficients)[i],
-                                            Estimate = coefficients[i, "Estimate"],
-                                            Std.Error = coefficients[i, "Std. Error"],
-                                            t.value = coefficients[i, "t value"],
-                                            Pr.t = coefficients[i, "Pr(>|t|)"],
-                                            Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
-                                            stringsAsFactors = FALSE))
-    }
-    
-    # If coefficients were extracted, add the model name
-    if (nrow(SAR_model_summary) > 0) {
-      SAR_model_summary$Model <- "Changepoint Detection Model"
-    }
-  } else {
-    cat("The changepoint_detection_model is NULL or invalid.\n")
-  }
-  
-  # Write the summary to an Excel file
-  write_xlsx(SAR_model_summary, path = "CFCS modeling data/SAR_model_summary.xlsx")
-  
-  #now for the MAR version
-  
-  
-  MAR_model_summary <- data.frame(Model = character(),
-                                  Coefficient = character(),
-                                  Estimate = numeric(),
-                                  Std.Error = numeric(),
-                                  t.value = numeric(),
-                                  Pr.t = numeric(),
-                                  Adj.R.squared = numeric(),
-                                  stringsAsFactors = FALSE)
-  
-  # Check if the model is valid
-  if (!is.null(changepoint_detection_model_MAR)) {
-    summary_model <- summary(changepoint_detection_model_MAR)
-    
-    # Extract coefficients
-    coefficients <- summary_model$coefficients
-    for (i in 1:nrow(coefficients)) {
       MAR_model_summary <- rbind(MAR_model_summary, 
                                  data.frame(Model = "Single Model",
-                                            Coefficient = rownames(coefficients)[i],
+                                            Coefficient = ifelse(rownames(coefficients)[i] == "(Intercept)", "Intercept", "Slope"),  # CHANGED
                                             Estimate = coefficients[i, "Estimate"],
                                             Std.Error = coefficients[i, "Std. Error"],
                                             t.value = coefficients[i, "t value"],
@@ -2019,32 +3416,67 @@ if (number_of_models==1){
   
   # Write the summary to an Excel file
   write_xlsx(MAR_model_summary, path = "CFCS modeling data/MAR_model_summary.xlsx")
-}
-
-## MAR lm summary save
-if(number_of_models>1){
-  MAR_model_summaries <- data.frame(Model = character(),
-                                    Coefficient = character(),
-                                    Estimate = numeric(),
-                                    Std.Error = numeric(),
-                                    t.value = numeric(),
-                                    Pr.t = numeric(),
-                                    Adj.R.squared = numeric(),
-                                    stringsAsFactors = FALSE)
   
-  # Extract information from each model and store it in the data frame
-  for (model_index in seq_along(list_of_models_MAR)) {
-    model <- list_of_models_MAR[[model_index]]
+  #now for the SAR version
+  
+  SAR_model_summary <- data.frame(Model = character(),
+                                  Coefficient = character(),
+                                  Estimate = numeric(),
+                                  Std.Error = numeric(),
+                                  t.value = numeric(),
+                                  Pr.t = numeric(),
+                                  Adj.R.squared = numeric(),
+                                  stringsAsFactors = FALSE)
+  
+  # Check if the model is valid
+  if (!is.null(changepoint_detection_model_SAR)) {
+    summary_model <- summary(changepoint_detection_model_SAR)
+    
+    # Extract coefficients
+    coefficients <- summary_model$coefficients
+    for (i in 1:nrow(coefficients)) {
+      SAR_model_summary <- rbind(SAR_model_summary, 
+                                 data.frame(Model = "Single Model",
+                                            Coefficient = ifelse(rownames(coefficients)[i] == "(Intercept)", "Intercept", "Slope"),  # CHANGED
+                                            Estimate = coefficients[i, "Estimate"],
+                                            Std.Error = coefficients[i, "Std. Error"],
+                                            t.value = coefficients[i, "t value"],
+                                            Pr.t = coefficients[i, "Pr(>|t|)"],
+                                            Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
+                                            stringsAsFactors = FALSE))
+    }
+    
+    # If coefficients were extracted, add the model name
+    if (nrow(SAR_model_summary) > 0) {
+      SAR_model_summary$Model <- "Changepoint Detection Model"
+    }
+  } else {
+    cat("The changepoint_detection_model is NULL or invalid.\n")
+  }
+  
+  # Write the summary to an Excel file
+  write_xlsx(SAR_model_summary, path = "CFCS modeling data/SAR_model_summary.xlsx")
+
+  #ccSAR version
+  if (exists("zi_correction_table")){
+    ccSAR_model_summary <- data.frame(Model = character(),
+                                      Coefficient = character(),
+                                      Estimate = numeric(),
+                                      Std.Error = numeric(),
+                                      t.value = numeric(),
+                                      Pr.t = numeric(),
+                                      Adj.R.squared = numeric(),
+                                      stringsAsFactors = FALSE)
     
     # Check if the model is valid
-    if (!is.null(model)) {
-      summary_model <- summary(model)
+    if (!is.null(changepoint_detection_model_ccSAR)) {
+      ccsummary_model <- summary(changepoint_detection_model_ccSAR)
       
       # Extract coefficients
-      coefficients <- summary_model$coefficients
+      coefficients <- ccsummary_model$coefficients
       for (i in 1:nrow(coefficients)) {
-        MAR_model_summaries <- rbind(MAR_model_summaries, 
-                                     data.frame(Model = paste("Model", model_index, "Indicies",extents[model_index] , "-", extents[model_index+1]),  # Adjusting index for naming
+        ccSAR_model_summary <- rbind(ccSAR_model_summary, 
+                                     data.frame(Model = "Single Model",
                                                 Coefficient = rownames(coefficients)[i],
                                                 Estimate = coefficients[i, "Estimate"],
                                                 Std.Error = coefficients[i, "Std. Error"],
@@ -2053,16 +3485,25 @@ if(number_of_models>1){
                                                 Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
                                                 stringsAsFactors = FALSE))
       }
+      
+      # If coefficients were extracted, add the model name
+      if (nrow(ccSAR_model_summary) > 0) {
+        ccSAR_model_summary$Model <- "Changepoint Detection Model"
+      }
     } else {
-      cat("Model at index", model_index, "is NULL or invalid.\n")
+      cat("The changepoint_detection_model is NULL or invalid.\n")
     }
+    
+    # Write the summary to an Excel file
+    write_xlsx(ccSAR_model_summary, path = "CFCS modeling data/ccSAR_model_summary.xlsx")
   }
-  write_xlsx(MAR_model_summaries, path = "CFCS modeling data/MAR_model_summaries.xlsx")
-}
-## SAR model summaries
+  
+  
+  }
+
 ## MAR lm summary save
 if(number_of_models>1){
-  SAR_model_summaries <- data.frame(Model = character(),
+  MAR_model_summaries <- data.frame(Model = character(),
                                     Coefficient = character(),
                                     Estimate = numeric(),
                                     Std.Error = numeric(),
@@ -2082,9 +3523,48 @@ if(number_of_models>1){
       # Extract coefficients
       coefficients <- summary_model$coefficients
       for (i in 1:nrow(coefficients)) {
+        MAR_model_summaries <- rbind(MAR_model_summaries, 
+                                     data.frame(Model = paste("Model", model_index, "Indicies",extents[model_index] , "-", extents[model_index+1]),  # Adjusting index for naming
+                                                Coefficient = ifelse(rownames(coefficients)[i] == "(Intercept)", "Intercept", "Slope"),  # CHANGED
+                                                Estimate = coefficients[i, "Estimate"],
+                                                Std.Error = coefficients[i, "Std. Error"],
+                                                t.value = coefficients[i, "t value"],
+                                                Pr.t = coefficients[i, "Pr(>|t|)"],
+                                                Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
+                                                stringsAsFactors = FALSE))
+      }
+    } else {
+      cat("Model at index", model_index, "is NULL or invalid.\n")
+    }
+  }
+  write_xlsx(MAR_model_summaries, path = "CFCS modeling data/MAR_model_summaries.xlsx")
+}
+## SAR model summaries
+## SAR lm summary save
+if(number_of_models>1){
+  SAR_model_summaries <- data.frame(Model = character(),
+                                    Coefficient = character(),
+                                    Estimate = numeric(),
+                                    Std.Error = numeric(),
+                                    t.value = numeric(),
+                                    Pr.t = numeric(),
+                                    Adj.R.squared = numeric(),
+                                    stringsAsFactors = FALSE)
+  
+  # Extract information from each model and store it in the data frame
+  for (model_index in seq_along(list_of_models_SAR)) {
+    model <- list_of_models_SAR[[model_index]]
+    
+    # Check if the model is valid
+    if (!is.null(model)) {
+      summary_model <- summary(model)
+      
+      # Extract coefficients
+      coefficients <- summary_model$coefficients
+      for (i in 1:nrow(coefficients)) {
         SAR_model_summaries <- rbind(SAR_model_summaries, 
                                      data.frame(Model = paste("Model", model_index, "Indicies",extents[model_index] , "-", extents[model_index+1]),  # Adjusting index for naming
-                                                Coefficient = rownames(coefficients)[i],
+                                                Coefficient = ifelse(rownames(coefficients)[i] == "(Intercept)", "Intercept", "Slope"),  # CHANGED
                                                 Estimate = coefficients[i, "Estimate"],
                                                 Std.Error = coefficients[i, "Std. Error"],
                                                 t.value = coefficients[i, "t value"],
@@ -2099,69 +3579,454 @@ if(number_of_models>1){
   write_xlsx(SAR_model_summaries, path = "CFCS modeling data/SAR_model_summaries.xlsx")
 }
 
+#ccSAR version
+if (exists("zi_correction_table")){
+  ## ccSAR model summaries
+  ## ccSAR lm summary save
+  if(number_of_models>1){
+    ccSAR_model_summaries <- data.frame(Model = character(),
+                                        Coefficient = character(),
+                                        Estimate = numeric(),
+                                        Std.Error = numeric(),
+                                        t.value = numeric(),
+                                        Pr.t = numeric(),
+                                        Adj.R.squared = numeric(),
+                                        stringsAsFactors = FALSE)
+    
+    # Extract information from each model and store it in the data frame
+    for (model_index in seq_along(list_of_models_ccSAR)) {
+      model <- list_of_models_ccSAR[[model_index]]
+      
+      # Check if the model is valid
+      if (!is.null(model)) {
+        summary_model <- summary(model)
+        
+        # Extract coefficients
+        coefficients <- summary_model$coefficients
+        for (i in 1:nrow(coefficients)) {
+          ccSAR_model_summaries <- rbind(ccSAR_model_summaries, 
+                                         data.frame(Model = paste("Model", model_index, "Indicies",extents[model_index] , "-", extents[model_index+1]),  # Adjusting index for naming
+                                                    Coefficient = ifelse(rownames(coefficients)[i] == "(Intercept)", "Intercept", "Slope"),  # CHANGED
+                                                    Estimate = coefficients[i, "Estimate"],
+                                                    Std.Error = coefficients[i, "Std. Error"],
+                                                    t.value = coefficients[i, "t value"],
+                                                    Pr.t = coefficients[i, "Pr(>|t|)"],
+                                                    Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
+                                                    stringsAsFactors = FALSE))
+        }
+      } else {
+        cat("Model at index", model_index, "is NULL or invalid.\n")
+      }
+    }
+    write_xlsx(ccSAR_model_summaries, path = "CFCS modeling data/ccSAR_model_summaries.xlsx")
+  }
+}
+
 # plot saves
-#SAR
-pdf(file.path(folder_name2, "SAR_models.pdf"), width = 8, height = 6)
-if (number_of_models>1){
-  print(ggplot(CFCS_table, aes(x = zi, y = `ln(Ci)`)) +
-          geom_point(color = "blue") +
-          labs(title = "SAR Modeling", x="Mid Depth (cm)", y="log-scale Pb-210 Activity (dpm/g)") +
-          geom_line(data = lines_df, aes(x = x, y = y, group = group, color = group), linewidth = 1.2, show.legend = TRUE) +
-          labs(color = "Model"))
-}else{
-  #SAR
+# SAR plot save
+pdf(
+  file.path(folder_name2, "SAR_models.pdf"),
+  width = 8,
+  height = 6
+)
+
+if (number_of_models > 1) {
   
-  print(SAR_model_plot + geom_line(aes(y = fitted(changepoint_detection_model)), color = "red", linewidth = 1))
-}
-dev.off()
-
-#MAR
-pdf(file.path(folder_name2, "MAR_models.pdf"), width = 8, height = 6)
-if (number_of_models>1){
-  print(ggplot(CFCS_table, aes(x =mi, y = `ln(Ci)`)) +
-          geom_point(color = "blue") +
-          labs(title = "MAR Modeling", x="Cumulative Mass Depth (g/cm^2)", y="log-scale Pb-210 Activity (dpm/g)") +
-          geom_line(data = lines_df_MAR, aes(x = x, y = y, group = group, color = group), linewidth = 1.2, show.legend = TRUE) +
-          labs(color = "Model"))
-}else{
+  SAR_models_plot <- ggplot(
+    CFCS_table,
+    aes(x = zi, y = `ln(Ci)`)
+  ) +
+    geom_point(
+      color = "blue"
+    ) +
+    labs(
+      title = "SAR Modeling",
+      x = "Mid Depth (cm)",
+      y = "log-scale Pb-210 Activity (dpm/g)"
+    ) +
+    geom_line(
+      data = lines_df_SAR,
+      aes(
+        x = x,
+        y = y,
+        group = group,
+        color = group
+      ),
+      linewidth = 1.2,
+      show.legend = TRUE
+    ) +
+    labs(
+      color = "Model"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "zi"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5)
+    )
   
-  print(MAR_model_plot + geom_line(aes(y = fitted(changepoint_detection_model_MAR)), color = "red", linewidth = 1))
+  print(SAR_models_plot)
+  
+} else {
+  
+  print(
+    SAR_model_plot +
+      geom_line(
+        data = single_line_df_SAR,
+        aes(x = zi, y = fitted_y),
+        inherit.aes = FALSE,
+        color = "red",
+        linewidth = 1
+      )
+  )
 }
+
+dev.off()
+#ccSAR version
+if (exists("zi_correction_table")){
+  # ccSAR plot save
+  pdf(
+    file.path(folder_name2, "ccSAR_models.pdf"),
+    width = 8,
+    height = 6
+  )
+  
+  if (number_of_models > 1) {
+    
+    ccSAR_models_plot <- ggplot(
+      CFCS_table,
+      aes(x = CFCS_table[, "Uncompacted Mid-Depth (cm)"], y = `ln(Ci)`)
+    ) +
+      geom_point(
+        color = "blue"
+      ) +
+      labs(
+        title = "Uncompacted SAR Modeling",
+        x = "Uncompacted Mid Depth (cm)",
+        y = "log-scale Pb-210 Activity (dpm/g)"
+      ) +
+      geom_line(
+        data = lines_df_ccSAR,
+        aes(
+          x = x,
+          y = y,
+          group = group,
+          color = group
+        ),
+        linewidth = 1.2,
+        show.legend = TRUE
+      ) +
+      labs(
+        color = "Model"
+      ) +
+      dynamic_scale(
+        CFCS_table,
+        "Uncompacted Mid-Depth (cm)"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5)
+      )
+    
+    print(ccSAR_models_plot)
+    
+  } else {
+    
+    print(
+      ccSAR_model_plot +
+        geom_line(
+          data = single_line_df_ccSAR,
+          aes(x = x, y = fitted_y),
+          inherit.aes = FALSE,
+          color = "red",
+          linewidth = 1
+        )
+    )
+  }
+  
+  dev.off()
+}
+
+# MAR plot save
+pdf(
+  file.path(folder_name2, "MAR_models.pdf"),
+  width = 8,
+  height = 6
+)
+
+if (number_of_models > 1) {
+  
+  MAR_models_plot <- ggplot(
+    CFCS_table,
+    aes(x = mi, y = `ln(Ci)`)
+  ) +
+    geom_point(
+      color = "blue"
+    ) +
+    labs(
+      title = "MAR Modeling",
+      x = "Cumulative Mass Depth (g/cm^2)",
+      y = "log-scale Pb-210 Activity (dpm/g)"
+    ) +
+    geom_line(
+      data = lines_df,
+      aes(
+        x = x,
+        y = y,
+        group = group,
+        color = group
+      ),
+      linewidth = 1.2,
+      show.legend = TRUE
+    ) +
+    labs(
+      color = "Model"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "mi"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5)
+    )
+  
+  print(MAR_models_plot)
+  
+} else {
+  
+  print(
+    MAR_model_plot +
+      geom_line(
+        data = single_line_df,
+        aes(x = mi, y = fitted_y),
+        inherit.aes = FALSE,
+        color = "red",
+        linewidth = 1
+      )
+  )
+}
+
 dev.off()
 
-#age-depth
-pdf(file.path(folder_name2, "age_depth.pdf"), width = 8, height = 6)
-print(ggplot(CFCS_table, aes(x = `Date (yr)`, y = `zi`)) +
-        geom_point(color = "blue") +
-        geom_errorbar(aes(xmin = `Date (yr)` - `Time Uncertainty (yr)`, 
-                           xmax = `Date (yr)` + `Time Uncertainty (yr)`, 
-                           y = `zi`,), 
-                       width = 0.2, color = "black") +  # Adjust height and color as needed
-        labs(title = "Age vs Depth Model", y = "Mid Depth (cm)", x="Year (CE)") +
-        scale_y_reverse() +
-        scale_x_reverse())
+# Age-depth
+pdf(
+  file.path(folder_name2, "age_depth.pdf"),
+  width = 8,
+  height = 6
+)
+
+age_depth_plot <- ggplot(
+  CFCS_table,
+  aes(x = `Date (CE)`, y = `zi`)
+) +
+  geom_point(
+    color = "blue"
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = `Date (CE)` - `Time Uncertainty (yr)`,
+      xmax = `Date (CE)` + `Time Uncertainty (yr)`,
+      y = `zi`
+    ),
+    width = 0.2,
+    color = "black"
+  ) +
+  labs(
+    title = "Age vs Depth Model",
+    y = "Mid Depth (cm)",
+    x = "Year (CE)"
+  ) +
+  dynamic_scale(
+    CFCS_table,
+    "Date (CE)",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    CFCS_table,
+    "zi",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
+print(age_depth_plot)
+
 dev.off()
 
-# age-mass depth
-pdf(file.path(folder_name2, "age_mass_depth.pdf"), width = 8, height = 6)
-print(ggplot(CFCS_table, aes(x = `Date (yr)`, y = `mi`)) +
-        geom_point(color = "blue") +
-        geom_errorbar(aes(xmin = `Date (yr)` - `Time Uncertainty (yr)`, 
-                           xmax = `Date (yr)` + `Time Uncertainty (yr)`, 
-                           y = `mi`), 
-                       width = 0.2, color = "black") +  # Adjust height and color as needed
-        labs(title = "Age vs Mass Depth Model", y="Cumulative Mass Depth (g/cm^2)", x="Year (CE)") +
-        scale_y_reverse() +
-        scale_x_reverse())
+#ccSAR version
+if (exists("zi_correction_table")){
+  # Age-uncompacted-depth
+  pdf(
+    file.path(folder_name2, "age_unccompacted_depth.pdf"),
+    width = 8,
+    height = 6
+  )
+  
+  age_depth_plot <- ggplot(
+    CFCS_table,
+    aes(x = `Date (CE)`, y = `Uncompacted Mid-Depth (cm)`)
+  ) +
+    geom_point(
+      color = "blue"
+    ) +
+    geom_errorbar(
+      aes(
+        xmin = `Date (CE)` - `Time Uncertainty (yr)`,
+        xmax = `Date (CE)` + `Time Uncertainty (yr)`,
+        y = `zi`
+      ),
+      width = 0.2,
+      color = "black"
+    ) +
+    labs(
+      title = "Age vs Depth Model",
+      y = "Uncompacted Mid Depth (cm)",
+      x = "Year (CE)"
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "Date (CE)",
+      reverse = TRUE
+    ) +
+    dynamic_scale(
+      CFCS_table,
+      "Uncompacted Mid-Depth (cm)",
+      axis = "y",
+      reverse = TRUE
+    ) +
+    theme_minimal()
+  
+  print(age_depth_plot)
+  
+  dev.off()
+}
+
+# Age-mass depth
+pdf(
+  file.path(folder_name2, "age_mass_depth.pdf"),
+  width = 8,
+  height = 6
+)
+
+age_mass_depth_plot <- ggplot(
+  CFCS_table,
+  aes(x = `Date (CE)`, y = `mi`)
+) +
+  geom_point(
+    color = "blue"
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = `Date (CE)` - `Time Uncertainty (yr)`,
+      xmax = `Date (CE)` + `Time Uncertainty (yr)`,
+      y = `mi`
+    ),
+    width = 0.2,
+    color = "black"
+  ) +
+  labs(
+    title = "Age vs Mass Depth Model",
+    y = "Cumulative Mass Depth (g/cm^2)",
+    x = "Year (CE)"
+  ) +
+  dynamic_scale(
+    CFCS_table,
+    "Date (CE)",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    CFCS_table,
+    "mi",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
+
+print(age_mass_depth_plot)
+
 dev.off()
 
 if (surface_active_zone_check==TRUE){
   print("CFCS model assumptions violated! This core has a surface active zone, only the relative ages of the sediment layers below the surface active layer could be calculated, not absolute ages")
   CFCS_table[,5]=NA
+}
+
+if (exists("hit_background") && !hit_background) {
+  print("CFCS model assumptions violated! Supported Pb-210 activity is unknown, CFCS is not a valid model")
+}
+inventory_completed=FALSE
+missing_inventory_method=readline(prompt = "Can CFCS be used to complete missing inventory? (TRUE or FALSE) ")
+if (missing_inventory_method==TRUE){
+  missing_inventory=(concentrations_table[(nrow(concentrations_table)),6]*(-decay_const/MAR_final_slope))/decay_const
+  missing_inventory_uncer=missing_inventory*sqrt((decay_const_uncer/decay_const)^2+(MAR_final_err/MAR_final)^2+(concentrations_table[nrow(concentrations_table),7]/concentrations_table[nrow(concentrations_table),6])^2)
+inventory_completed=TRUE
+  }else{
+ref_date_check=readline(prompt = "Do you have an independent chronometer reference date for a sediment layer? (TRUE or FALSE) ")  
+if (ref_date_check==TRUE){
+  ref_date=as.numeric(readline(prompt = "Enter reference age (CE) "))
+  ref_depth=as.numeric(readline(prompt = "Enter reference date depth (cm) "))
+  # Locate the independently dated reference layer
+  Aj_idx <- which(!is.na(concentrations_table[, 1]) & concentrations_table[, 1] == ref_depth)
+  # Reference-layer age
+  delta_t <- numeric_date - ref_date
+  D <- exp(delta_t * decay_const) - 1
+  # Identify rows above and below the reference layer.
+  upper_idx <- if (Aj_idx > 1) {
+    1:(Aj_idx - 1)
+  } else {
+    integer(0)
   }
+  
+  lower_idx <- if (Aj_idx < nrow(concentrations_table)) {
+    (Aj_idx + 1):nrow(concentrations_table)
+  } else {
+    integer(0)
+  }
+  # Reference-layer inventory and uncertainty
+  reference_inventory <- concentrations_table[Aj_idx, 10]
+  reference_error <- concentrations_table[Aj_idx, 11]
+  # Measured inventory above the reference layer: delta A
+  A_delta <- sum(concentrations_table[upper_idx, 10],na.rm = TRUE)+0.5*reference_inventory
+  # Uncertainty in A_delta
+  A_delta_error <- sqrt(sum(concentrations_table[upper_idx, 11]^2,na.rm = TRUE)+(0.5*reference_error)^2)
+  # Measured inventory below the reference layer
+  Aj_measured_fraction <- sum(concentrations_table[lower_idx, 10],na.rm = TRUE)+0.5*reference_inventory
+  # Uncertainty in measured inventory below reference
+  Aj_measured_error <- sqrt(sum(concentrations_table[lower_idx, 11]^2,na.rm = TRUE)+(0.5 * reference_error)^2)
+  # Calculate complete inventory below the reference horizon
+  Aj_calculated <- A_delta / D
+  # Uncertainty in Aj_calculated
+  Aj_calculated_error <-A_delta_error / D
+  # Covariance between Aj_calculated and Aj_measured_fraction
+  covariance_calc_measured <-reference_error^2 / (4 * D)
+  # Missing inventory
+  missing_inventory <-Aj_calculated - Aj_measured_fraction
+  missing_inventory_variance <-Aj_calculated_error^2 +Aj_measured_error^2 -2 * covariance_calc_measured
+  # Prevent tiny negative values from floating-point round-off
+  missing_inventory_variance <-max(0, missing_inventory_variance)
+  missing_inventory_uncer <-sqrt(missing_inventory_variance)
+  
+inventory_completed=TRUE
+  }else{
+ind_MAR_check=readline(prompt = "Do you have an independent estimate of MAR at the bottom of the sediment core? (TRUE or FALSE) ")
+if (ind_MAR_check==TRUE){
+  independent_MAR_num=as.numeric(readline(prompt = "Enter MAR (g/(cm^2 yr)) "))
+  independent_MAR_num_uncer=as.numeric(readline(prompt = "Enter MAR uncertainty (g/(cm^2 yr)) "))
+  missing_inventory=(concentrations_table[(nrow(concentrations_table)),6]*(independent_MAR_num))/decay_const
+  missing_inventory_uncer=missing_inventory*sqrt((decay_const_uncer/decay_const)^2+(independent_MAR_num_uncer/independent_MAR_num)^2+(concentrations_table[nrow(concentrations_table),7]/concentrations_table[nrow(concentrations_table),6])^2)
+inventory_completed=TRUE
+  }
+}
+}
+if (inventory_completed==FALSE){
+  missing_inventory=0
+  missing_inventory_uncer=0
+}
 
 finish_CFCS=readline(prompt = "CFCS modeling complete. Continue to CF? (True or False) ")
-
 #start of CF section
 if (finish_CFCS==TRUE){
 #create CF table and begin populating it
@@ -2177,7 +4042,7 @@ for (i in (nrow(CF_table)):1){
   if (i %% 2 ==1){
     if (i==nrow(CF_table)){
       CF_table[nrow(CF_table),5]=missing_inventory
-      CF_table[nrow(CF_table),6]=CF_table[nrow(CF_table),5]*sqrt((decay_const_uncer/decay_const)^2+(MAR_final_err/MAR_final)^2+(concentrations_table[nrow(concentrations_table),7]/concentrations_table[nrow(concentrations_table),6])^2)
+      CF_table[nrow(CF_table),6]=missing_inventory_uncer
     }else{
       CF_table[i,5]=CF_table[i+2,5]+CF_table[i+1,3]
       CF_table[i, 6] = sqrt(sum(CF_table[i + 2, 6]^2, CF_table[i+1, 4]^2))
@@ -2210,34 +4075,135 @@ for (i in 1:(nrow(CF_table)-2)){
     CF_table[i,11]=CF_table[i,10]*sqrt((CF_table[i,6]/CF_table[i,5])^2+(1-((CF_table[i,5]-CF_table[(i+2),5])/CF_table[i,5]))*(concentrations_table[i,9]/concentrations_table[i,8])^2)
   }
 }
-# DBD layer loop
+# surface DBD determination
+has_DBD_0=readline(prompt="Do you have a measured DBD surface value? (TRUE or FALSE)")
+
+if (has_DBD_0==TRUE){
+  DBD_layer=as.numeric(readline(prompt="Enter DBD (g/cm^3)"))
+  DBD_layer_uncer=as.numeric(readline(prompt="Enter DBD Uncertainty (g/cm^3)"))
+}else{
+
+DBD_layer_table=array(data=NA, dim=c(10,2), dimnames=list(NULL, c("zi","DBDi")))
+
+# Construct the first 10 interval records
+DBD_layer_table <- data.frame(
+  zi = mass_table[seq(2, 20, by = 2), 2],
+  DBDi = NA_real_
+)
+
+DBD <- mass_table[
+  seq(2, 20, by = 2),
+  "Dry Bulk Density DBD gcm^-3"
+]
+
+# Only take logarithms of finite, positive activities
+valid_DBD <- is.finite(DBD) & DBD > 0
+
+DBD_layer_table$DBDi[valid_DBD] <- DBD[valid_DBD]
+
+# Preserve the original-measurement rule
+for (j in seq_len(nrow(DBD_layer_table))) {
+  if (is.na(original_section_DBD_evens[j]) ||
+      !original_section_DBD_evens[j]) {
+    DBD_layer_table$DBDi[j] <- NA_real_
+  }
+}
+
+DBD_layer_model_list <- list()
+model_summaries_surf_DBD <- list()
+
+for (extent in 3:10) {
+  
+  candidate <- DBD_layer_table[seq_len(extent), ]
+  
+  # Identify valid observations
+  valid <- is.finite(candidate[, "zi"]) &
+    is.finite(candidate[, "DBDi"])
+  
+  fit_data <- candidate[valid, , drop = FALSE]
+  
+  # Use the same columns for every candidate model
+  result <- data.frame(
+    Model = paste0("Indices 1-", extent),
+    N = nrow(fit_data),
+    Used_indices = paste(which(valid), collapse = ", "),
+    Intercept = NA_real_,
+    Slope = NA_real_,
+    Intercept_SE = NA_real_,
+    Slope_SE = NA_real_,
+    R.squared = NA_real_,
+    Adj.R.squared = NA_real_,
+    Status = "Insufficient valid observations",
+    stringsAsFactors = FALSE
+  )
+  
+  # Require at least 3 observations and distinct predictor values
+  if (nrow(fit_data) >= 3 &&
+      length(unique(fit_data$zi)) >= 2) {
+    
+    model <- lm(DBDi ~ zi, data = fit_data)
+    
+    DBD_layer_model_list[[as.character(extent - 2)]] <- model
+    
+    sm <- summary(model)
+    coefs <- sm$coefficients
+    
+    result$Intercept <- unname(coef(model)[1])
+    result$Slope <- unname(coef(model)[2])
+    result$Intercept_SE <- coefs[1, "Std. Error"]
+    result$Slope_SE <- coefs[2, "Std. Error"]
+    result$R.squared <- sm$r.squared
+    result$Adj.R.squared <- sm$adj.r.squared
+    result$Status <- "Fitted"
+  }
+  
+  model_summaries_surf_DBD[[as.character(extent)]] <- result
+}
+
+# Combine all candidate summaries
+model_summary_table <- do.call(
+  rbind,
+  model_summaries_surf_DBD
+)
+model_summaries_surf_DBD=model_summary_table
+rownames(model_summaries_surf_DBD) <- NULL
+print("Please determine surface layer DBD")
+print(DBD_layer_table)
+print(model_summaries_surf_DBD[,-(2:3)])
+selection_complete=FALSE
+while (selection_complete==FALSE){
+  best_model_index=readline(prompt = "Select model (1-8) ")
+  
+  # Step 3: Retrieve the corresponding model
+  best_model <- DBD_layer_model_list[[best_model_index]]
+  
+  DBD_layer <- summary(best_model)$coefficients[1,1]
+  DBD_layer_uncer <- summary(best_model)$coefficients["(Intercept)", "Std. Error"]
+  print("Surface DBD (dpm/g)")
+  print(unname(DBD_layer))
+  selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
+}
+}
+#DBD loop
 for (i in 1:(nrow(CF_table)-2)){
   if (i %% 2 ==1){
     if (i==1){
-      DBD_layer_table=array(data=NA, dim=c(10,3), dimnames=list(NULL, c("zi","mi","DBD g/cm^3")))
-      DBD_layer_table[,1]=na.omit(mass_table[1:20,2])
-      DBD_layer_table[,2]=na.omit(concentrations_table[1:20,12])
-      DBD_layer_table[,3]=na.omit(mass_table[1:20,4])
-      DBD_model_list=list()
-      for (j in 3:10) {
-        # Define the extent of the data to use for the model
-        extent_DBD <- j  # This will give 3, 4, ..., 10
-        # Extract the x and y values from the array
-        x_values_DBD <- DBD_layer_table[1:extent_DBD, 2]  # Column 2 for x values
-        y_values_DBD <- DBD_layer_table[1:extent_DBD, 3]  # Column 3 for y values
-        # Fit the linear model and store it in the list
-        DBD_model_list[[j-2]] <- lm(y_values_DBD ~ x_values_DBD)
-      }
-      # Step 1: Extract R^2 values
-      r_squared_values_DBD <- sapply(DBD_model_list, function(model) summary(model)$adj.r.squared)
-      # Step 2: Identify the index of the model with the highest R^2
-      best_model_index_DBD <- which.max(r_squared_values_DBD)
-      # Step 3: Retrieve the corresponding model
-      best_model_DBD <- DBD_model_list[[best_model_index_DBD]]
-      CF_table[1,14]=summary(best_model_DBD)$coefficients[1,1]
-      #CF_table[i,14]= mean(CF_table[2:6,12], na.rm=TRUE)
+      CF_table[1,14]=DBD_layer
     }else{
-      CF_table[i,14]=mean(CF_table[(i-1):(i+1),12], na.rm=TRUE)
+      fraction =
+        (CF_table[i,"Top of Interval z(i) cm"] -
+           CF_table[(i-1),"Mid Depth zi cm"]) /
+        (CF_table[(i+1),"Mid Depth zi cm"] -
+           CF_table[(i-1),"Mid Depth zi cm"])
+      
+      CF_table[i,"Dry Bulk Density Layer r(i) g/cm^3"] =
+        CF_table[(i-1),"Dry Bulk Density Section ri g/cm^3"] +
+        ((CF_table[(i+1),"Dry Bulk Density Section ri g/cm^3"] -
+            CF_table[(i-1),"Dry Bulk Density Section ri g/cm^3"])) * fraction
+      
+      CF_table[i,"Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3"] =
+        sqrt((1-fraction)^2 * CF_table[(i-1),"Dry Bulk Density Section Uncertainty u(ri) g/cm^3"]^2 +
+               (fraction)^2 * CF_table[(i+1),"Dry Bulk Density Section Uncertainty u(ri) g/cm^3"]^2)
     }
   }
 }
@@ -2251,7 +4217,7 @@ for (i in 1:(nrow(CF_table)-2)){
 for (i in 1:(nrow(CF_table)-2)){
   if (i %% 2 ==1){
     if (i==1){
-      CF_table[i,15]=summary(best_model_DBD)$coefficients["(Intercept)", "Std. Error"]
+      CF_table[i,15]=DBD_layer_uncer
     }else{
       CF_table[i,15]=sqrt((CF_table[(i+1),13])^2+(CF_table[(i-1),13])^2)/2
     }
@@ -2278,14 +4244,35 @@ CF_age_table[, 2] = na.omit(CF_table[, 8])
 CF_age_table[, 1] = na.omit(CF_table[, 9])
 CF_age_table = as.data.frame(CF_age_table)
 
-CF_age_table_plot = ggplot(CF_age_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Age vs Layer Depth", x = "Year (CE)", y = "Layer Depth (cm)") +  # Add labels
-  scale_x_reverse(breaks = seq(min(CF_age_table$x), max(CF_age_table$x), by = 10), 
-                  labels = number_format(accuracy = 1)) +  # Set x-axis increments of 10 without decimals
-  scale_y_reverse(breaks = seq(min(CF_age_table$y), max(CF_age_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
-  theme_minimal()  # Use a minimal theme
+CF_age_table_plot <- ggplot(
+  CF_age_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Age vs Layer Depth",
+    x = "Year (CE)",
+    y = "Layer Depth (cm)"
+  ) +
+  dynamic_scale(
+    CF_age_table,
+    "x",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    CF_age_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
 
 print(CF_age_table_plot)
 dev.off()
@@ -2298,14 +4285,35 @@ CF_age_md_table[, 2] = na.omit(CF_table[, 8])
 CF_age_md_table[, 1] = na.omit(CF_table[, 9])
 CF_age_md_table = as.data.frame(CF_age_md_table)
 
-CF_age_md_table_plot = ggplot(CF_age_md_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Age vs Cumulative Mass Depth", x = "Year (CE)", y = "Cumulative Mass Depth (g/cm^2)") +  # Add labels
-  scale_x_reverse(breaks = seq(min(CF_age_md_table$x), max(CF_age_md_table$x), by = 10), 
-                  labels = number_format(accuracy = 1)) +  # Set x-axis increments of 10 without decimals
-  scale_y_reverse(breaks = seq(min(CF_age_md_table$y), max(CF_age_md_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +
-  theme_minimal()  # Use a minimal theme
+CF_age_md_table_plot <- ggplot(
+  CF_age_md_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Age vs Cumulative Mass Depth",
+    x = "Year (CE)",
+    y = "Cumulative Mass Depth (g/cm^2)"
+  ) +
+  dynamic_scale(
+    CF_age_md_table,
+    "x",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    CF_age_md_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
 
 print(CF_age_md_table_plot)
 dev.off()
@@ -2321,17 +4329,38 @@ MAR_plot_table = as.data.frame(MAR_plot_table)
 MAR_plot_table <- MAR_plot_table[order(MAR_plot_table$y), ]
 
 MAR_plot <- ggplot() +
-  geom_point(data = MAR_plot_table, aes(x = x, y=y)) +
-  geom_path(data = MAR_plot_table, aes(x=x, y = y), color = "red") +
-  geom_errorbar(data = MAR_plot_table,
-                aes(y = y, xmin = x - x_uncertainty, xmax = x + x_uncertainty),
-                width = 0.2) +
-  labs(title = "Mass Accumulation Rate by Year",
-       x = "Mass Accumualtion Rate (g/(cm^2 yr))",
-       y = "Year (CE)") +
-  scale_x_continuous(breaks = seq(min(MAR_plot_table$x), max(MAR_plot_table$x), by = breaks_by_value(MAR_plot_table, "x")), labels=scales::number_format(accuracy=accuracy_finder(MAR_plot_table[,2]))) +
-  scale_y_continuous(breaks = seq(min(MAR_plot_table$y), max(MAR_plot_table$y), by = 5),
-                     labels = scales::number_format(accuracy = 1)) +
+  geom_point(
+    data = MAR_plot_table,
+    aes(x = x, y = y)
+  ) +
+  geom_path(
+    data = MAR_plot_table,
+    aes(x = x, y = y),
+    color = "red"
+  ) +
+  geom_errorbar(
+    data = MAR_plot_table,
+    aes(
+      y = y,
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Mass Accumulation Rate by Year",
+    x = "Mass Accumualtion Rate (g/(cm^2 yr))",
+    y = "Year (CE)"
+  ) +
+  dynamic_scale(
+    MAR_plot_table,
+    "x"
+  ) +
+  dynamic_scale(
+    MAR_plot_table,
+    "y",
+    axis = "y"
+  ) +
   theme_minimal()
 
 print(MAR_plot)
@@ -2345,58 +4374,45 @@ SAR_plot_table[, 1] = na.omit(CF_table[, 16])
 SAR_plot_table = as.data.frame(SAR_plot_table)
 
 SAR_plot <- ggplot() +
-  geom_point(data = SAR_plot_table, aes(x = x, y=y)) +
-  geom_path(data = SAR_plot_table, aes(x=x, y = y), color = "blue") +
-  geom_errorbar(data = SAR_plot_table,
-                aes(y = y, xmin = x - x_uncertainty, xmax = x + x_uncertainty),
-                width = 0.2) +
-  labs(title = "Sediment Accumulation Rate by Year",
-       x = "Sediment Accumulation Rate (cm/yr)",
-       y = "Year (CE)") +
-  scale_x_continuous(breaks = seq(min(SAR_plot_table$x), max(SAR_plot_table$x), by = breaks_by_value(SAR_plot_table,"x")), labels=scales::number_format(accuracy=accuracy_finder(SAR_plot_table[,2]))) +
-  scale_y_continuous(breaks = seq(min(SAR_plot_table$y), max(SAR_plot_table$y), by = 5),
-                     labels = scales::number_format(accuracy = 1)) +
+  geom_point(
+    data = SAR_plot_table,
+    aes(x = x, y = y)
+  ) +
+  geom_path(
+    data = SAR_plot_table,
+    aes(x = x, y = y),
+    color = "blue"
+  ) +
+  geom_errorbar(
+    data = SAR_plot_table,
+    aes(
+      y = y,
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Sediment Accumulation Rate by Year",
+    x = "Sediment Accumulation Rate (cm/yr)",
+    y = "Year (CE)"
+  ) +
+  dynamic_scale(
+    SAR_plot_table,
+    "x"
+  ) +
+  dynamic_scale(
+    SAR_plot_table,
+    "y",
+    axis = "y"
+  ) +
   theme_minimal()
 
 print(SAR_plot)
 dev.off()
-
-model_summaries_DBD <- data.frame(Model = character(),
-                                  Coefficient = character(),
-                                  Estimate = numeric(),
-                                  Std.Error = numeric(),
-                                  t.value = numeric(),
-                                  Pr.t = numeric(),
-                                  Adj.R.squared = numeric(),
-                                  stringsAsFactors = FALSE)
-
-# Extract information from each model and store it in the data frame
-for (model_index in seq_along(DBD_model_list)) {
-  model <- DBD_model_list[[model_index]]
-  
-  # Check if the model is valid
-  if (!is.null(model)) {
-    summary_model <- summary(model)
-    
-    # Extract coefficients
-    coefficients <- summary_model$coefficients
-    for (i in 1:nrow(coefficients)) {
-      model_summaries_DBD <- rbind(model_summaries_DBD, 
-                                   data.frame(Model = paste("Model", model_index, "Indices 1-",model_index+2),  # Adjusting index for naming
-                                              Coefficient = rownames(coefficients)[i],
-                                              Estimate = coefficients[i, "Estimate"],
-                                              Std.Error = coefficients[i, "Std. Error"],
-                                              t.value = coefficients[i, "t value"],
-                                              Pr.t = coefficients[i, "Pr(>|t|)"],
-                                              Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
-                                              stringsAsFactors = FALSE))
-    }
-  } else {
-    cat("Model at index", model_index, "is NULL or invalid.\n")
-  }
+if (exists("model_summaries_surf_DBD")){
+write_xlsx(model_summaries_surf_DBD, path = "CF modeling data/DBD_model_summaries.xlsx")
 }
-write_xlsx(model_summaries_DBD, path = "CF modeling data/DBD_model_summaries.xlsx")
-
 # run some CF/CFCS comparisons, save plots and data to their own folder
 if (surface_active_zone_check==FALSE){
 folder_name5 = "CF_CFCS model comparisons"
@@ -2457,20 +4473,38 @@ if (any(is.na(combined_data))) {
 combined_data <- na.omit(combined_data)
 
 # Create the plot with reversed axes
-CF_CFCS_comp_plot_z=ggplot(combined_data, aes(x = Age, y = Depth, color = Source)) +
+CF_CFCS_comp_plot_z <- ggplot(
+  combined_data,
+  aes(x = Age, y = Depth, color = Source)
+) +
   geom_point() +
-  geom_line(aes(group = Source)) +
-  labs(x = "Age (CE)", y = "Depth (cm)", title = "CF and CFCS Age Model Comparisons (z)") +
-  theme_minimal() +
-  scale_color_manual(values = c("CF" = "blue", "CFCS" = "red")) +  # Customize colors as needed
-  scale_x_continuous(trans = "reverse", 
-                     limits = c(max(combined_data$Age), min(combined_data$Age)), 
-                     breaks = seq(min(combined_data$Age), max(combined_data$Age), by = 10), 
-                     labels = number_format(accuracy = 1)) +  # Reverse the x-axis with custom breaks and labels
-  scale_y_continuous(trans = "reverse", 
-                     limits = c(max(combined_data$Depth), min(combined_data$Depth)), 
-                     breaks = seq(min(combined_data$Depth), max(combined_data$Depth), by = 2), 
-                     labels = number_format(accuracy = 0.5))  # Reverse the y-axis
+  geom_line(
+    aes(group = Source)
+  ) +
+  labs(
+    x = "Age (CE)",
+    y = "Depth (cm)",
+    title = "CF and CFCS Age Model Comparisons (z)"
+  ) +
+  dynamic_scale(
+    combined_data,
+    "Age",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    combined_data,
+    "Depth",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  scale_color_manual(
+    values = c(
+      "CF" = "blue",
+      "CFCS" = "red"
+    )
+  ) +
+  theme_minimal()
+
 print(CF_CFCS_comp_plot_z)
 dev.off()
 #mass depth comparison plot
@@ -2510,20 +4544,38 @@ if (any(is.na(combined_data_md))) {
 combined_data_md <- na.omit(combined_data_md)
 
 # Create the plot with reversed axes
-CF_CFCS_comp_plot_md=ggplot(combined_data_md, aes(x = Age, y = Depth, color = Source)) +
+CF_CFCS_comp_plot_md <- ggplot(
+  combined_data_md,
+  aes(x = Age, y = Depth, color = Source)
+) +
   geom_point() +
-  geom_line(aes(group = Source)) +
-  labs(x = "Age (CE)", y = "Cumulative Mass Depth (g/cm^2)", title = "CF and CFCS Age Model Comparisons (md)") +
-  theme_minimal() +
-  scale_color_manual(values = c("CF" = "blue", "CFCS" = "red")) +  # Customize colors as needed
-  scale_x_continuous(trans = "reverse", 
-                     limits = c(max(combined_data_md$Age), min(combined_data_md$Age)), 
-                     breaks = seq(min(combined_data_md$Age), max(combined_data_md$Age), by = 10), 
-                     labels = number_format(accuracy = 1)) +  # Reverse the x-axis with custom breaks and labels
-  scale_y_continuous(trans = "reverse", 
-                     limits = c(max(combined_data_md$Depth), min(combined_data_md$Depth)), 
-                     breaks = seq(min(combined_data_md$Depth), max(combined_data_md$Depth), by = 2), 
-                     labels = number_format(accuracy = 0.5))  # Reverse the y-axis
+  geom_line(
+    aes(group = Source)
+  ) +
+  labs(
+    x = "Age (CE)",
+    y = "Cumulative Mass Depth (g/cm^2)",
+    title = "CF and CFCS Age Model Comparisons (md)"
+  ) +
+  dynamic_scale(
+    combined_data_md,
+    "Age",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    combined_data_md,
+    "Depth",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  scale_color_manual(
+    values = c(
+      "CF" = "blue",
+      "CFCS" = "red"
+    )
+  ) +
+  theme_minimal()
+
 print(CF_CFCS_comp_plot_md)
 dev.off()
 # save the cf/cfcs table to CSV
@@ -2540,8 +4592,10 @@ if (est_local_flux==TRUE){
   flux_table <- data.frame(
     `Lower Latitudinal Bound` = c(70, 60, 50, 40, 30, 20, 10, 0, -20, -30, -40, -50, -70, -80, -90),
     `Upper Latitudinal Bound` = c(80, 70, 60, 50, 40, 30, 20, 10, -10, -20, -30, -40, -60, -70, -80),
-    `Equation Coefficient` = c(0.04, 0.10, 0.03, 0.06, 0.13, 0.25, 0.09, -0.03, 0.06, 0.01, 0.11, 0.06, 0.01, 0.02, 0.02),
-    `Equation y Intercept` = c(0.07, -16.1, 74.9, 117.5, 71.8, -124.6, -6.4, 239.9, -2.2, 56.5, -31.3, -3.5, 1.7, 0.2, 0.5),
+    `Equation Slope` = c(0.04483, 0.09515, 0.03139, 0.05889, 0.12995, 0.25347, 0.08746, -0.03217, 0.0603, 0.0133, 0.11289, 0.05475, 0.00955, 0.02246, 0.01689),
+    `Equation y Intercept` = c(0.07302, -16.14357, 74.9366, 117.5243, 71.78459, -124.54982, -6.35611, 239.85701, -2.1501, 56.46349, -31.33849, -3.46801, 1.67204, 0.17641, 0.50693),
+    `Slope SE`=c(0.00925,0.01825,0.01323,0.01587,0.02924,0.0434,0.01395,0.04825,0.02593,0.02871,0.03322,0.01296,0.00281,0.00543,0.00263),
+    `Intercept SE`=c(11.13663,10.59527,17.07211,19.27045,34.97366,97.24497,22.18361,112.95092,34.32702,29.41251,38.30933,17.72279,0.93411,0.97109,0.16005),
     `Pearson r square` = c(0.84, 0.76, 0.25, 0.25, 0.39, 0.59, 0.94, 0.29, 0.66, 0.15, 0.65, 0.80, 0.77, 0.86, 0.92)
   )
   lat_band=as.numeric(readline(prompt = "Enter core latitude (indicate southern latitude with -) "))
@@ -2550,8 +4604,10 @@ if (est_local_flux==TRUE){
     if (lat_band>= flux_table[i,1] & lat_band<=flux_table[i,2]){
       flux_est=flux_table[i,3]*precip_mm+flux_table[i,4]
       flux_est=(flux_est*60)/10000
-      cat("Local curve estimate atmospheric Pb-210 flux is ", flux_est, " dpm/(cm^2 y)\n")
-      insert_results=c(flux_est,flux_table[i,5])
+      flux_est_unc=sqrt((precip_mm*flux_table[i,5])^2+flux_table[i,6]^2)
+      flux_est_unc=(flux_est_unc*60)/10000
+      cat("Local curve estimate atmospheric Pb-210 flux is ", flux_est, " +/- ", flux_est_unc, " dpm/(cm^2 y)\n")
+      insert_results=c(flux_est,flux_est_unc)
       break
     }
   }
@@ -2584,12 +4640,15 @@ write_xlsx(as.data.frame(flux_table), flux_table_path)
   }
   
   if (as.numeric((missing_inventory/CF_table[1,5])*100)>=20){
-    print("missing inventory is greater than 20%! CF model assumptions violated, interpret with caution")
+    print("missing inventory is greater than 20%! Interpret with caution")
   }
   if (SAZ_depth!=0){
     if (as.numeric((temp_surface_table[SAZ_depth,2]/concentrations_table[nrow(concentrations_table),1])*100)>=20){
-      print("surface active zone is greater than 20% of the core! CF model assumptions violated, interpret with caution")
+      print("surface active zone is greater than 20% of the core! Interpret with caution")
   }
+  }
+  if (inventory_completed==FALSE){
+    print("Could not complete inventory! CF is not a valid model")
   }
   finish_CF=readline(prompt = "CF modeling complete. Continue to CA? (True or False) ")
 
@@ -2614,14 +4673,21 @@ write_xlsx(as.data.frame(core_boundary_info), boundary_table_path)
 #start of CA section
 if (finish_CF==TRUE){
 #initialize array
-CA_table=array(data=NA, dim=c((nrow(concentrations_table)+1),17), dimnames=list(NULL,c("Mid Depth zi cm", "ln(Ci)","Age ti yr","Age Uncertainty u(ti) yr","CIC Age CE","ur(l)","ur(C0)","ur(Ci)","t(i) yr","u(t(i)) yr","delta t yr","Uncertainty delta t yr"," Sediment Accumulation Rate s cm/yr","Sediment Accumulation Rate Uncertainty u(s) cm/yr","Mass Accumualtion Rate r g/(cm^2 yr)","Mass Accumualtion Rate Uncertainty u(r) g/(cm^2 yr)","Mass Depth Section mi gcm^-2")))
+folder_name4 = "CA modeling data"
+dir.create(folder_name4)
+CA_table=array(data=NA, dim=c((nrow(concentrations_table)+1),20), dimnames=list(NULL,c("Mid Depth zi cm", "ln(Ci)","Age ti yr","Age Uncertainty u(ti) yr","CA Age CE","ur(l)","ur(C0)","ur(Ci)","t(i) yr","u(t(i)) yr","delta t yr","Uncertainty delta t yr"," Sediment Accumulation Rate s cm/yr","Sediment Accumulation Rate Uncertainty u(s) cm/yr","Mass Accumualtion Rate r g/(cm^2 yr)","Mass Accumualtion Rate Uncertainty u(r) g/(cm^2 yr)","Mass Depth Section mi gcm^-2","Mass Depth Section Uncertainty u(mi) gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","Cumulative Mass Depth Layer Uncertainty u(m(i)) gcm^-2")))
 colnames(CA_table) <- gsub("delta", "\u0394", colnames(CA_table))
 # load copied data
 CA_table[,1]=mass_table[,2]
 CA_table[1:nrow(concentrations_table),2]=concentrations_table[,13]
 CA_table[,17]=mass_table[,10]
+CA_table[,18]=mass_table[,11]
+CA_table[,19]=mass_table[,8]
+CA_table[,20]=mass_table[,9]
+
+
 #start the loops
-#age ti yr, CIC year, ur(l), ur(C0), ur(Ci)
+#age ti yr, CA year, ur(l), ur(C0), ur(Ci)
 for (i in 1:nrow(CA_table)){
   if (i%%2==0){
     CA_table[i,3]=log(concentrations_table[1,8]/concentrations_table[i,6])/decay_const
@@ -2642,15 +4708,26 @@ for (i in 1:(nrow(CA_table))){
   if (i%%2==1){
     if (i==1){
       CA_table[i,9]=0
-      CA_table[i,10]=0 ##confirm this change was correct
+      CA_table[i,10]=0
+    }else if (i==nrow(CA_table)){
+      fraction=(CA_table[i,"Cumulative Mass Depth Layer m(i) gcm^-2"]-CA_table[(i-1),"Mass Depth Section mi gcm^-2"])/(CA_table[(i-1),"Mass Depth Section mi gcm^-2"]-CA_table[(i-3),"Mass Depth Section mi gcm^-2"])
+      CA_table[i,9]=CA_table[(i-1),"Age ti yr"]+(CA_table[(i-1),"Age ti yr"]-CA_table[(i-3),"Age ti yr"])*fraction
+      CA_table[i,10]=sqrt((1+fraction)^2*CA_table[(i-1),"Age Uncertainty u(ti) yr"]^2+fraction^2*CA_table[(i-3),"Age Uncertainty u(ti) yr"]^2)
     }else{
-      if (i==nrow(CA_table)){
-        CA_table[i,9]=CA_table[(i-1),3]+(CA_table[(i-1),3]-CA_table[(i-3),3])/2
-        CA_table[i,10]=CA_table[(i-2),10]
-      }else{
-        CA_table[i,9]=mean(CA_table[(i+1):(i-1),3], na.rm=TRUE)
-        CA_table[i,10]=sqrt((CA_table[(i+1),4])^2+(CA_table[(i-1),4])^2)/2
-      }
+      fraction =
+        (CA_table[i,"Cumulative Mass Depth Layer m(i) gcm^-2"] -
+           CA_table[(i-1),"Mass Depth Section mi gcm^-2"]) /
+        (CA_table[(i+1),"Mass Depth Section mi gcm^-2"] -
+           CA_table[(i-1),"Mass Depth Section mi gcm^-2"])
+      
+      CA_table[i,"t(i) yr"] =
+        CA_table[(i-1),"Age ti yr"] +
+        ((CA_table[(i+1),"Age ti yr"] -
+            CA_table[(i-1),"Age ti yr"])) * fraction
+      
+      CA_table[i,"u(t(i)) yr"] =
+        sqrt((1-fraction)^2 * CA_table[(i-1),"Age Uncertainty u(ti) yr"]^2 +
+               (fraction)^2 * CA_table[(i+1),"Age Uncertainty u(ti) yr"]^2)
     }
   }
 }
@@ -2670,9 +4747,162 @@ for (i in 1:(nrow(CA_table))){
     CA_table[i,16]=(CA_table[i,15]*CA_table[i,12])/CA_table[i,11]
   }
 }
+if (exists("zi_correction_table")) {
+  
+  # Output table
+  ccSAR_CA <- data.frame(
+    `CA Uncompacted SAR (cm/yr)` =
+      rep(NA_real_, nrow(CA_table)),
+    `CA Uncompacted SAR Uncertainty (cm/yr)` =
+      rep(NA_real_, nrow(CA_table))
+  )
+  
+  # Covariance matrix of corrected top-of-interval depths
+  Sigma_top <- attr(
+    zi_correction_table,
+    "Corrected_TopDepth_Covariance"
+  )
+  
+  # Covariance matrix of corrected section thicknesses
+  Sigma_hprime <- attr(
+    zi_correction_table,
+    "Corrected_Thickness_Covariance"
+  )
+  
+  if (is.null(Sigma_top) || is.null(Sigma_hprime)) {
+    stop("Corrected-depth covariance matrices are missing.")
+  }
+  
+  n_sections <- nrow(Sigma_hprime)
+  
+  if (nrow(CA_table) < 2 * n_sections) {
+    stop("CA_table has fewer rows than required for the corrected sections.")
+  }
+  
+  # Calculate SAR for each even-numbered CA row
+  for (i in seq_len(nrow(CA_table))) {
+    
+    if (i %% 2 != 0) next
+    
+    # Corresponding sediment section
+    section <- i / 2
+    
+    if (section > n_sections) next
+    
+    # Corrected thickness of this section
+    delta_z <- as.numeric(
+      zi_correction_table[
+        section * 2,
+        "Uncompacted Section Thickness (cm)"
+      ]
+    )
+    
+    # CA age interval and its uncertainty
+    delta_t <- as.numeric(CA_table[i, 11])
+    sigma_delta_t <- as.numeric(CA_table[i, 12])
+    
+    # Validate inputs
+    if (!is.finite(delta_z) ||
+        !is.finite(delta_t) ||
+        delta_t == 0 ||
+        !is.finite(sigma_delta_t) ||
+        sigma_delta_t < 0) {
+      next
+    }
+    
+    # Compaction-corrected SAR
+    ccSAR_CA[i, 1] <- delta_z / delta_t
+    
+    # Variance of corrected section thickness
+    var_delta_z <- Sigma_hprime[section, section]
+    
+    # First-order uncertainty propagation:
+    # SAR = delta_z / delta_t
+    var_SAR <-
+      var_delta_z / delta_t^2 +
+      (delta_z^2 * sigma_delta_t^2) / delta_t^4
+    
+    ccSAR_CA[i, 2] <- sqrt(max(var_SAR, 0))
+  }
+  
+  # Export only rows corresponding to CA sediment intervals
+  valid_rows <- which(
+    seq_len(nrow(CA_table)) %% 2 == 0 &
+      is.finite(ccSAR_CA[, 1])
+  )
+  zi_exp=na.omit(zi_correction_table[,10])
+  ccSAR_CA_export <- data.frame(
+    zi_exp,
+    ccSAR_CA[valid_rows, 1],
+    ccSAR_CA[valid_rows, 2],
+    check.names = FALSE
+  )
+  
+  names(ccSAR_CA_export) <- c(
+    "Uncompacted Mid-Depth (cm)",
+    "CA Uncompacted SAR (cm/yr)",
+    "CA Uncompacted SAR Uncertainty (cm/yr)"
+  )
+  
+  ccSAR_CA_table_path <- file.path(
+    folder_name4,
+    "CA_ccSAR.xlsx"
+  )
+  
+  write_xlsx(ccSAR_CA_export, ccSAR_CA_table_path)
+  # Plot CA compaction-corrected SAR
+  pdf(
+    file.path(folder_name4, "ccSAR_plot_CA.pdf"),
+    width = 8,
+    height = 6
+  )
+  
+  valid_plot_rows <- which(
+    is.finite(CA_table[, 5]) &
+      is.finite(ccSAR_CA[, 1]) &
+      is.finite(ccSAR_CA[, 2])
+  )
+  
+  ccSAR_plot_table_CA <- data.frame(
+    x = as.numeric(CA_table[valid_plot_rows, 5]),
+    y = as.numeric(ccSAR_CA[valid_plot_rows, 1]),
+    y_uncertainty = as.numeric(ccSAR_CA[valid_plot_rows, 2])
+  )
+  
+  ccSAR_plot_CA <- ggplot(
+    ccSAR_plot_table_CA,
+    aes(x = x, y = y)
+  ) +
+    geom_point() +
+    geom_path(color = "blue") +
+    geom_errorbar(
+      aes(
+        ymin = y - y_uncertainty,
+        ymax = y + y_uncertainty
+      ),
+      width = 0.2
+    ) +
+    labs(
+      title = "Compaction Corrected Sediment Accumulation Rate by Year",
+      x = "Year (CE)",
+      y = "Sediment Accumulation Rate (cm/yr)"
+    ) +
+    dynamic_scale(
+      ccSAR_plot_table_CA,
+      "x",
+      reverse = TRUE
+    ) +
+    dynamic_scale(
+      ccSAR_plot_table_CA,
+      "y",
+      axis = "y"
+    ) +
+    theme_minimal()
+  
+  print(ccSAR_plot_CA)
+  dev.off()
+}
 # save off the data
-folder_name4 = "CA modeling data"
-dir.create(folder_name4)
 CA_table_path <- file.path(folder_name4, "CA_table.xlsx")
 write_xlsx(as.data.frame(CA_table), CA_table_path)
 
@@ -2681,96 +4911,75 @@ write_xlsx(as.data.frame(CA_table), CA_table_path)
 pdf(file.path(folder_name4, "excess_log_pb210_md_CA.pdf"), width = 8, height = 6)
 elogpb210_md_plotting_table_CA=array(data=NA, dim=c(nrow(CA_table)/2,3), dimnames=list(NULL, c("x","y", "y_uncertainty")))
 elogpb210_md_plotting_table_CA[,1]=na.omit(mass_table[,10])
-elogpb210_md_plotting_table_CA[,2]=na.omit(concentrations_table[,13])
-elogpb210_md_plotting_table_CA[,3]=na.omit(concentrations_table[,14])
+elogpb210_md_plotting_table_CA[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),13]
+elogpb210_md_plotting_table_CA[,3]=concentrations_table[seq(2, nrow(CA_table), by=2),14]
 elogpb210_md_plotting_table_CA=as.data.frame(elogpb210_md_plotting_table_CA)
-elogpb210_md_plot_CA=ggplot(elogpb210_md_plotting_table_CA, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red") +
-  labs(title = "Excess Log-scale Pb-210 vs Mass Depth", x = "Cumulative Mass Depth (g/cm^2)", y ="Excess Log-scale Pb-210 (dmp/g)") +  # Add labels
-  scale_y_continuous(breaks = seq(min(elogpb210_md_plotting_table_CA$y), max(elogpb210_md_plotting_table_CA$y), by = breaks_by_value(elogpb210_md_plotting_table_CA, "y")), labels=scales::number_format(accuracy=accuracy_finder(elogpb210_md_plotting_table_CA[,3]))) +  # Set x-axis dynamically
-  scale_x_continuous(breaks = seq(min(elogpb210_md_plotting_table_CA$x), max(elogpb210_md_plotting_table_CA$x), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +  # Set y-axis dynamically
-  theme_minimal()  # Use a minimal theme
+elogpb210_md_plot_CA <- ggplot(
+  elogpb210_md_plotting_table_CA,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_smooth(
+    method = "lm",
+    formula = y ~ x,
+    se = FALSE,
+    color = "red"
+  ) +
+  labs(
+    title = "Excess Log-scale Pb-210 vs Mass Depth",
+    x = "Cumulative Mass Depth (g/cm^2)",
+    y = "Excess Log-scale Pb-210 (dpm/g)"
+  ) +
+  dynamic_scale(
+    elogpb210_md_plotting_table_CA,
+    "x"
+  ) +
+  dynamic_scale(
+    elogpb210_md_plotting_table_CA,
+    "y",
+    axis = "y"
+  ) +
+  theme_minimal()
+
 print(elogpb210_md_plot_CA)
 dev.off()
 #log actvity/depth
 pdf(file.path(folder_name4, "excess_log_pb210_CA.pdf"), width = 8, height = 6)
 elogpb210_plotting_table_CA=array(data=NA, dim=c(nrow(CA_table)/2,3), dimnames=list(NULL, c("x","y", "y_uncertainty")))
 elogpb210_plotting_table_CA[,1]=na.omit(CA_table[,1])
-elogpb210_plotting_table_CA[,2]=na.omit(concentrations_table[,13])
-elogpb210_plotting_table_CA[,3]=na.omit(concentrations_table[,14])
+elogpb210_plotting_table_CA[,2]=concentrations_table[seq(2, nrow(CA_table), by=2),13]
+elogpb210_plotting_table_CA[,3]=concentrations_table[seq(2, nrow(CA_table), by=2),14]
 elogpb210_plotting_table_CA=as.data.frame(elogpb210_plotting_table_CA)
-elogpb210_CA_plot=ggplot(elogpb210_plotting_table_CA, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "red") +
-  labs(title = "Excess Log-scale Pb-210 vs Depth", x = "Mid Depth (cm)", y ="Excess Log-scale Pb-210 (dmp/g)") +  # Add labels
-  scale_y_continuous(breaks = seq(min(elogpb210_plotting_table_CA$y), max(elogpb210_plotting_table_CA$y), by = breaks_by_value(elogpb210_plotting_table_CA, "y")), labels=scales::number_format(accuracy=accuracy_finder(elogpb210_plotting_table_CA[,3]))) +  # Set x-axis dynamically
-  scale_x_continuous(breaks = seq(min(elogpb210_plotting_table_CA$x), max(elogpb210_plotting_table_CA$x), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +
-  theme_minimal()  # Use a minimal theme
+elogpb210_CA_plot <- ggplot(
+  elogpb210_plotting_table_CA,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_smooth(
+    method = "lm",
+    formula = y ~ x,
+    se = FALSE,
+    color = "red"
+  ) +
+  labs(
+    title = "Excess Log-scale Pb-210 vs Depth",
+    x = "Mid Depth (cm)",
+    y = "Excess Log-scale Pb-210 (dpm/g)"
+  ) +
+  dynamic_scale(
+    elogpb210_plotting_table_CA,
+    "x"
+  ) +
+  dynamic_scale(
+    elogpb210_plotting_table_CA,
+    "y",
+    axis = "y"
+  ) +
+  theme_minimal()
+
 print(elogpb210_CA_plot)
 dev.off()
 
-#save off lms used in plots above
-#log actvity/mass depth
-elogpb210_md_plotting_table_CA_summary <- data.frame(Model = character(),
-                                                     Coefficient = character(),
-                                                     Estimate = numeric(),
-                                                     Std.Error = numeric(),
-                                                     t.value = numeric(),
-                                                     Pr.t = numeric(),
-                                                     Adj.R.squared = numeric(),
-                                                     stringsAsFactors = FALSE)
-
-# Check if the model is valid
-elogpb210_md_plotting_table_CA_model = lm(y ~ x, data = elogpb210_md_plotting_table_CA)
-summary_model <- summary(elogpb210_md_plotting_table_CA_model)
-
-# Extract coefficients
-coefficients <- summary_model$coefficients
-for (i in 1:nrow(coefficients)) {
-  elogpb210_md_plotting_table_CA_summary <- rbind(elogpb210_md_plotting_table_CA_summary, 
-                                                  data.frame(Model = "CA MAR Model",
-                                                             Coefficient = rownames(coefficients)[i],
-                                                             Estimate = coefficients[i, "Estimate"],
-                                                             Std.Error = coefficients[i, "Std. Error"],
-                                                             t.value = coefficients[i, "t value"],
-                                                             Pr.t = coefficients[i, "Pr(>|t|)"],
-                                                             Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
-                                                             stringsAsFactors = FALSE))
-}
-
-# Write the summary to an Excel file
-write_xlsx(elogpb210_md_plotting_table_CA_summary, path = "CA modeling data/elogpb210_md_CA_summary.xlsx")
-#log actvity/zi depth
-elogpb210_plotting_table_CA_summary <- data.frame(Model = character(),
-                                                  Coefficient = character(),
-                                                  Estimate = numeric(),
-                                                  Std.Error = numeric(),
-                                                  t.value = numeric(),
-                                                  Pr.t = numeric(),
-                                                  Adj.R.squared = numeric(),
-                                                  stringsAsFactors = FALSE)
-
-# Check if the model is valid
-elogpb210_plotting_table_CA_model = lm(y ~ x, data = elogpb210_plotting_table_CA)
-summary_model <- summary(elogpb210_plotting_table_CA_model)
-
-# Extract coefficients
-coefficients <- summary_model$coefficients
-for (i in 1:nrow(coefficients)) {
-  elogpb210_plotting_table_CA_summary <- rbind(elogpb210_plotting_table_CA_summary, 
-                                               data.frame(Model = "CA SAR model",
-                                                          Coefficient = rownames(coefficients)[i],
-                                                          Estimate = coefficients[i, "Estimate"],
-                                                          Std.Error = coefficients[i, "Std. Error"],
-                                                          t.value = coefficients[i, "t value"],
-                                                          Pr.t = coefficients[i, "Pr(>|t|)"],
-                                                          Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
-                                                          stringsAsFactors = FALSE))
-}
-
-# Write the summary to an Excel file
-write_xlsx(elogpb210_plotting_table_CA_summary, path = "CA modeling data/elogpb210_zi_CA_summary.xlsx")
 
 ## make CA SAR plot
 pdf(file.path(folder_name4, "SAR_plot_CA.pdf"), width = 8, height = 6)
@@ -2781,18 +4990,39 @@ SAR_plot_table_CA[, 3] = na.omit(CA_table[1:(length(CA_table[, 13])), 14])
 SAR_plot_table_CA = as.data.frame(SAR_plot_table_CA)
 
 SAR_plot_CA <- ggplot() +
-  geom_point(data = SAR_plot_table_CA, aes(x = x, y = y)) +
-  geom_path(data = SAR_plot_table_CA, aes(x = x, y = y), color = "blue") +
-  geom_errorbar(data = SAR_plot_table_CA,
-                aes(x = x, ymin = y - y_uncertainty, ymax = y + y_uncertainty),
-                width = 0.2) +
-  labs(title = "Sediment Accumulation Rate by Year",
-       x = "Year (CE)",
-       y = "Sediment Accumulation Rate cm/yr") +
-  scale_x_reverse(breaks = seq(min(SAR_plot_table_CA$x), max(SAR_plot_table_CA$x), by = (length(concentrations_table[,1])*interval_thickness)/5), 
-                  labels = scales::number_format(accuracy = 1)) +  # Set x-axis dynamically
-  scale_y_continuous(breaks = seq(min(SAR_plot_table_CA$y), max(SAR_plot_table_CA$y), by = breaks_by_value(SAR_plot_table_CA, "y")), 
-                     labels = scales::number_format(accuracy = accuracy_finder(SAR_plot_table_CA[, 3]))) +
+  geom_point(
+    data = SAR_plot_table_CA,
+    aes(x = x, y = y)
+  ) +
+  geom_path(
+    data = SAR_plot_table_CA,
+    aes(x = x, y = y),
+    color = "blue"
+  ) +
+  geom_errorbar(
+    data = SAR_plot_table_CA,
+    aes(
+      x = x,
+      ymin = y - y_uncertainty,
+      ymax = y + y_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Sediment Accumulation Rate by Year",
+    x = "Year (CE)",
+    y = "Sediment Accumulation Rate cm/yr"
+  ) +
+  dynamic_scale(
+    SAR_plot_table_CA,
+    "x",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    SAR_plot_table_CA,
+    "y",
+    axis = "y"
+  ) +
   theme_minimal()
 
 print(SAR_plot_CA)
@@ -2807,17 +5037,39 @@ MAR_plot_table_CA[, 3] = na.omit(CA_table[1:(length(CA_table[, 13])), 16])
 MAR_plot_table_CA = as.data.frame(MAR_plot_table_CA)
 
 MAR_plot_CA <- ggplot() +
-  geom_point(data = MAR_plot_table_CA, aes(x = x, y = y)) +
-  geom_path(data = MAR_plot_table_CA, aes(x = x, y = y), color = "red") +
-  geom_errorbar(data = MAR_plot_table_CA,
-                aes(x = x, ymin = y - y_uncertainty, ymax = y + y_uncertainty),
-                width = 0.2) +
-  labs(title = "Mass Accumulation Rate by Year",
-       x = "Year (CE)",
-       y = "Mass Accumulation Rate (g/(cm^2 yr))") +
-  scale_x_reverse(breaks = seq(min(MAR_plot_table_CA$x), max(MAR_plot_table_CA$x), by = (length(concentrations_table[,1])*interval_thickness)/5), 
-                  labels = scales::number_format(accuracy = 1)) +  # Set x-axis dynamically
-  scale_y_continuous(breaks = seq(min(MAR_plot_table_CA$y), max(MAR_plot_table_CA$y), by = breaks_by_value(MAR_plot_table_CA, "y")), labels=scales::number_format(accuracy=accuracy_finder(MAR_plot_table_CA[,3]))) +
+  geom_point(
+    data = MAR_plot_table_CA,
+    aes(x = x, y = y)
+  ) +
+  geom_path(
+    data = MAR_plot_table_CA,
+    aes(x = x, y = y),
+    color = "red"
+  ) +
+  geom_errorbar(
+    data = MAR_plot_table_CA,
+    aes(
+      x = x,
+      ymin = y - y_uncertainty,
+      ymax = y + y_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Mass Accumulation Rate by Year",
+    x = "Year (CE)",
+    y = "Mass Accumulation Rate (g/(cm^2 yr))"
+  ) +
+  dynamic_scale(
+    MAR_plot_table_CA,
+    "x",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    MAR_plot_table_CA,
+    "y",
+    axis = "y"
+  ) +
   theme_minimal()
 
 print(MAR_plot_CA)
@@ -2830,14 +5082,35 @@ CA_age_table[, 2] = na.omit(CA_table[, 4])
 CA_age_table[, 3] = na.omit(CA_table[, 5])
 CA_age_table = as.data.frame(CA_age_table)
 
-CA_age_table_plot = ggplot(CA_age_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Age vs Mid Depth", x = "Year (CE)", y = "Mid Depth (cm)") +  # Add labels
-  scale_x_reverse(breaks = seq(min(CA_age_table$x), max(CA_age_table$x), by = 10), 
-                  labels = number_format(accuracy = 1)) +  # Set x-axis increments of 10 without decimals
-  scale_y_reverse(breaks = seq(min(CA_age_table$y), max(CA_age_table$y), by = interval_thickness*2), labels=scales::number_format(accuracy=0.5)) +  # Set x-axis dynamically
-  theme_minimal()  # Use a minimal theme
+CA_age_table_plot <- ggplot(
+  CA_age_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Age vs Mid Depth",
+    x = "Year (CE)",
+    y = "Mid Depth (cm)"
+  ) +
+  dynamic_scale(
+    CA_age_table,
+    "x",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    CA_age_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
 
 print(CA_age_table_plot)
 dev.off()
@@ -2850,14 +5123,35 @@ CA_age_md_table[, 2] = na.omit(CA_table[, 4])
 CA_age_md_table[, 3] = na.omit(CA_table[, 5])
 CA_age_md_table = as.data.frame(CA_age_md_table)
 
-CA_age_md_table_plot = ggplot(CA_age_md_table, aes(x = x, y = y)) +
-  geom_point() +  # Add points
-  geom_errorbar(aes(xmin = x - x_uncertainty, xmax = x + x_uncertainty), width = 0.2) +  # Add error bars
-  labs(title = "Age vs Mass Depth", x = "Year (CE)", y = "Cumulative Mass Depth (g/cm^2)") +  # Add labels
-  scale_x_reverse(breaks = seq(min(CA_age_md_table$x), max(CA_age_md_table$x), by = 10), 
-                  labels = number_format(accuracy = 1)) +  # Set x-axis increments of 10 without decimals
-  scale_y_reverse(breaks = seq(min(CA_age_md_table$y), max(CA_age_md_table$y), by = breaks_by_value(mass_depth_table, "Mass Depth mi (g/cm^2)")), labels=scales::number_format(accuracy=accuracy_finder(mass_depth_table[,2]))) +
-  theme_minimal()  # Use a minimal theme
+CA_age_md_table_plot <- ggplot(
+  CA_age_md_table,
+  aes(x = x, y = y)
+) +
+  geom_point() +
+  geom_errorbar(
+    aes(
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  labs(
+    title = "Age vs Mass Depth",
+    x = "Year (CE)",
+    y = "Cumulative Mass Depth (g/cm^2)"
+  ) +
+  dynamic_scale(
+    CA_age_md_table,
+    "x",
+    reverse = TRUE
+  ) +
+  dynamic_scale(
+    CA_age_md_table,
+    "y",
+    axis = "y",
+    reverse = TRUE
+  ) +
+  theme_minimal()
 
 print(CA_age_md_table_plot)
 dev.off()
@@ -2875,169 +5169,573 @@ for (i in 1:nrow(CA_table)){
 }
 }
 #optional accumulation rate calculator for other materials in a core
+material_filepaths=c()
 material_accum_opt=readline(prompt = "CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True or False) ")
 mat_accum_finished=TRUE
 while (mat_accum_finished==TRUE){
   
-if (material_accum_opt==TRUE){
-  print("select material data")
-  file_path_new_mat=file.choose()
-  new_mat_dat <- read_excel(file_path_new_mat, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
-  new_mat_dat=as.matrix(new_mat_dat)
-  new_mat_dat=new_mat_dat[1:length(na.omit(CF_table[,10]))]
-  new_mat_table=array(NA, dim=c(length(new_mat_dat),10))
-  first_entry=readline(prompt = "Label your material of interest and provide units (g/g) or (p/g)")
-  ## 1. Get first word (XX)
-  xx <- strsplit(first_entry, "\\s+")[[1]][1]
-  ## 2. Determine units (ZZ)
-  if (grepl("\\(g/g\\)", first_entry)) {
-    zz <- "g/(m^2 yr)"
-  } else if (grepl("\\(p/g\\)", first_entry)) {
-    zz <- "p/(m^2 yr)"
-  } else {
-    stop("Unknown units in input string.")
-  }
-  ## 3. Prefixes AAAA
-  aaaa <- c("CF", "CFCS", "CA")
-  ## 4. Build labels
-  acc_labels <- paste(aaaa, xx, "Accumulation Rate", zz)
-  new_column_names_mat_data=c(first_entry,"CF Mass Accumulation g/(m^2 yr)","CF Layer Age (yr CE)",acc_labels[1],"CFCS Mass Accumulation g/(m^2 yr)","CFCS Layer Age (yr CE)",acc_labels[2],"CA Mass Accumulation g/(m^2 yr)","CA Layer Age (yr CE)",acc_labels[3])
-  colnames(new_mat_table)=new_column_names_mat_data
-  new_mat_table[,1]=new_mat_dat
-  new_mat_table[,1] <- na.approx(new_mat_table[,1], na.rm = FALSE)
-  new_mat_table[,2]=na.omit(CF_table[,10])*1000
-  new_mat_table[,3]=na.omit(CF_table[,9])
-  new_mat_table[,4]=new_mat_table[,2]*new_mat_table[,1]
-  
-  if (surface_active_zone_check==TRUE){
-  }else{
-  if (number_of_changepoints>0){
-  index_fixer=0
-  for (i in 1:(length(extents)-1)){
-    if (extents[i]>1){
-      index_fixer=1
+  if (material_accum_opt==TRUE){
+    print("select material data")
+    file_path_new_mat=file.choose()
+    material_filepaths=c(material_filepaths,file_path_new_mat)
+    new_mat_dat <- read_excel(file_path_new_mat, col_names = TRUE, col_types = "numeric", .name_repair = "unique_quiet")
+    new_mat_dat=as.matrix(new_mat_dat)
+    new_mat_table=array(NA, dim=c((nrow(new_mat_dat)*2),21))
+    first_entry=readline(prompt = "Label your material of interest and provide units (g/g) or (p/g)")
+    second_entry <- sub(
+      " (\\([^)]*\\))$",
+      " Uncertainty \\1",
+      first_entry
+    )
+    third_entry=paste0("Layer ", first_entry)
+    fourth_entry=paste0("Layer ", second_entry)
+    ## 1. Get first word (XX)
+    xx <- strsplit(first_entry, "\\s+")[[1]][1]
+    ## 2. Determine units (ZZ)
+    if (grepl("\\(g/g\\)", first_entry)) {
+      zz <- "g/(m^2 yr)"
+    } else if (grepl("\\(p/g\\)", first_entry)) {
+      zz <- "p/(m^2 yr)"
+    } else {
+      stop("Unknown units in input string.")
     }
-    new_mat_table[(extents[i]+index_fixer):extents[i+1],5]=(-decay_const/summary(list_of_models_MAR[[i]])$coefficients[2, 1])*1000
+    ## 3. Prefixes AAAA
+    aaaa <- c("CF", "CFCS", "CA")
+    ## 4. Build labels
+    acc_labels <- paste(aaaa, xx, "Accumulation Rate", zz)
+    acc_labels_unc=paste(aaaa, xx, "Accumulation Rate Uncertainty", zz)
+    new_column_names_mat_data=c("Cumulative Mass Depth Layer m(i) gcm^-2","Mass Depth Section mi gcm^-2", first_entry, second_entry,third_entry,fourth_entry, "CF Mass Accumulation g/(m^2 yr)","CF Mass Accumulation Uncertainty g/(m^2 yr)","CF Layer Age (yr CE)",acc_labels[1],acc_labels_unc[1], "CFCS Mass Accumulation g/(m^2 yr)","CFCS Mass Accumulation Uncertainty g/(m^2 yr)","CFCS Section Age (yr CE)",acc_labels[2],acc_labels_unc[2],"CA Mass Accumulation g/(m^2 yr)","CA Mass Accumulation Uncertainty g/(m^2 yr)","CA Section Age (yr CE)", acc_labels[3],acc_labels_unc[3])
+    colnames(new_mat_table)=new_column_names_mat_data
+    new_mat_table[,"Cumulative Mass Depth Layer m(i) gcm^-2"]=mass_table[1:nrow(new_mat_table),8]
+    new_mat_table[,"Mass Depth Section mi gcm^-2"]=mass_table[1:nrow(new_mat_table),10]
+    new_mat_table[,"CF Mass Accumulation g/(m^2 yr)"]=CF_table[1:nrow(new_mat_table),10]*1000
+    new_mat_table[,"CF Mass Accumulation Uncertainty g/(m^2 yr)"]=CF_table[1:nrow(new_mat_table),11]*1000
+    new_mat_table[,"CF Layer Age (yr CE)"]=CF_table[1:nrow(new_mat_table),9]
+    #add reformatted data
+    for (i in 1:nrow(new_mat_table)){
+      if (i %% 2 == 0){
+        new_mat_table[i,first_entry]=new_mat_dat[(i/2),1]
+        new_mat_table[i,second_entry]=new_mat_dat[(i/2),2]
+      }
+    }
+    original_section_valid <- !is.na(new_mat_table[[first_entry]])
+    #now interpolate any missing values
+    for (i in 1:nrow(new_mat_table)){
+      if (i %% 2 == 0){
+        if (is.na(new_mat_table[i,first_entry])){
+          
+          #find the previous section with a concentration value
+          j = i - 2
+          while (j >= 2 && !original_section_valid[j]){
+            j = j - 2
+          }
+          
+          #find the next section with a concentration value
+          k = i + 2
+          while (k <= nrow(new_mat_table) && !original_section_valid[k]){
+            k = k + 2
+          }
+          
+          #interpolate only if there is a valid section on both sides
+          if (j >= 2 && k <= nrow(new_mat_table)){
+            
+            fraction =
+              (new_mat_table[i,"Mass Depth Section mi gcm^-2"] -
+                 new_mat_table[j,"Mass Depth Section mi gcm^-2"]) /
+              (new_mat_table[k,"Mass Depth Section mi gcm^-2"] -
+                 new_mat_table[j,"Mass Depth Section mi gcm^-2"])
+            
+            new_mat_table[i,first_entry] =
+              new_mat_table[j,first_entry] +
+              (new_mat_table[k,first_entry] -
+                 new_mat_table[j,first_entry]) * fraction
+            
+            new_mat_table[i,second_entry] =
+              sqrt((1-fraction)^2 * new_mat_table[j,second_entry]^2 +
+                     fraction^2 * new_mat_table[k,second_entry]^2)
+          }
+        }
+      }
+    }
+    
+    #now interpolate the layer concentrations from the section concentrations
+    for (i in 1:nrow(new_mat_table)){
+      if (i == 1){
+        fraction=new_mat_table[(i+1),"Mass Depth Section mi gcm^-2"]/(new_mat_table[(i+3),"Mass Depth Section mi gcm^-2"]-new_mat_table[(i+1),"Mass Depth Section mi gcm^-2"])
+        new_mat_table[i,third_entry]=new_mat_table[(i+1),first_entry]-((new_mat_table[(i+3),first_entry]-new_mat_table[(i+1),first_entry]))*fraction
+        new_mat_table[i, fourth_entry]=sqrt((1-fraction)^2*new_mat_table[(i+1),second_entry]^2+(fraction)^2*new_mat_table[(i+3),second_entry]^2)
+        
+      } else if (i == nrow(new_mat_table)){
+        # last row is empty
+        
+      } else if (i %% 2 == 1){
+        fraction =
+          (new_mat_table[i,"Cumulative Mass Depth Layer m(i) gcm^-2"] -
+             new_mat_table[(i-1),"Mass Depth Section mi gcm^-2"]) /
+          (new_mat_table[(i+1),"Mass Depth Section mi gcm^-2"] -
+             new_mat_table[(i-1),"Mass Depth Section mi gcm^-2"])
+        
+        new_mat_table[i,third_entry] =
+          new_mat_table[(i-1),first_entry] +
+          ((new_mat_table[(i+1),first_entry] -
+              new_mat_table[(i-1),first_entry])) * fraction
+        
+        new_mat_table[i,fourth_entry] =
+          sqrt((1-fraction)^2 * new_mat_table[(i-1),second_entry]^2 +
+                 (fraction)^2 * new_mat_table[(i+1),second_entry]^2)
+        
+      }
+    }
+    
+    new_mat_table[,acc_labels[1]]=new_mat_table[,"CF Mass Accumulation g/(m^2 yr)"]*new_mat_table[,third_entry]
+    new_mat_table[,acc_labels_unc[1]]=new_mat_table[,acc_labels[1]]*sqrt((new_mat_table[,"CF Mass Accumulation Uncertainty g/(m^2 yr)"]/new_mat_table[,"CF Mass Accumulation g/(m^2 yr)"])^2+(new_mat_table[,fourth_entry]/new_mat_table[,third_entry])^2)
+    
+    if (surface_active_zone_check==TRUE){
+    }else{
+      for (i in seq_len(number_of_models)) {
+        
+        start_j <- if (i == 1) extents[i] * 2 else (extents[i] + 1) * 2
+        end_j   <- extents[i + 1] * 2
+        
+        for (j in seq(start_j, end_j, by = 2)) {
+          
+          new_mat_table[j, "CFCS Mass Accumulation g/(m^2 yr)"] <-
+            MAR_rates[i, 1] * 1000
+          
+          new_mat_table[j, "CFCS Mass Accumulation Uncertainty g/(m^2 yr)"] <-
+            MAR_rates[i, 2] * 1000
+        }
+      }
+      for (k in 1:nrow(new_mat_table)){
+        if (k%%2==0){
+          new_mat_table[k,"CFCS Section Age (yr CE)"]=CFCS_table[(k/2),5]
+        }
+      }
+      new_mat_table[,acc_labels[2]]=new_mat_table[,"CFCS Mass Accumulation g/(m^2 yr)"]*new_mat_table[,first_entry]
+      new_mat_table[,acc_labels_unc[2]]=new_mat_table[,acc_labels[2]]*sqrt((new_mat_table[,"CFCS Mass Accumulation Uncertainty g/(m^2 yr)"]/new_mat_table[,"CFCS Mass Accumulation g/(m^2 yr)"])^2+(new_mat_table[,second_entry]/new_mat_table[,first_entry])^2)
+    }
+    
+    new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"]=CA_table[1:nrow(new_mat_table),15]*1000
+    new_mat_table[,"CA Mass Accumulation Uncertainty g/(m^2 yr)"]=CA_table[1:nrow(new_mat_table),16]*1000
+    new_mat_table[,"CA Section Age (yr CE)"]=CA_table[1:nrow(new_mat_table),5]
+    new_mat_table[,acc_labels[3]]=new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"]*new_mat_table[,first_entry]
+    new_mat_table[,acc_labels_unc[3]]=new_mat_table[,acc_labels[3]]*sqrt((new_mat_table[,"CA Mass Accumulation Uncertainty g/(m^2 yr)"]/new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"])^2+(new_mat_table[,second_entry]/new_mat_table[,first_entry])^2)
+    
+    CA_valid=TRUE
+    if(valid_check<0 && material_accum_opt==TRUE){
+      CA_valid=FALSE
+    }
+    main_title <- paste(xx, "Accumulation Rate")
+    new_mat_accum_plot_md <- function() {
+      
+      has_CFCS <- any(!is.na(new_mat_table[, "CFCS Section Age (yr CE)"]))
+      has_CA   <- (CA_valid == TRUE)
+      
+      # CF
+      x1 <- new_mat_table[, acc_labels[1]]
+      y1 <- new_mat_table[, "Cumulative Mass Depth Layer m(i) gcm^-2"]
+      e1 <- new_mat_table[, acc_labels_unc[1]]
+      
+      # CFCS
+      x2 <- new_mat_table[, acc_labels[2]]
+      y2 <- new_mat_table[, "Mass Depth Section mi gcm^-2"]
+      e2 <- new_mat_table[, acc_labels_unc[2]]
+      
+      # CA
+      if (has_CA) {
+        x3 <- new_mat_table[, acc_labels[3]]
+        y3 <- new_mat_table[, "Mass Depth Section mi gcm^-2"]
+        e3 <- new_mat_table[, acc_labels_unc[3]]
+      }
+      
+      # All y values used in the plot
+      y_all <- c(
+        y1,
+        if (has_CFCS) y2 else NULL,
+        if (has_CA) y3 else NULL
+      )
+      
+      # All x values
+      x_all <- c(
+        x1,
+        if (has_CFCS) x2 else NULL,
+        if (has_CA) x3 else NULL
+      )
+      
+      # Include x error bars when determining x limits
+      x_all_with_error <- c(
+        x1 - e1, x1 + e1,
+        if (has_CFCS) c(x2 - e2, x2 + e2) else NULL,
+        if (has_CA) c(x3 - e3, x3 + e3) else NULL
+      )
+      
+      # Dynamic y-axis
+      y_scale <- dynamic_scale(
+        data.frame(y = y_all),
+        "y",
+        axis = "base",
+        reverse = TRUE
+      )
+      
+      # Plot limits
+      ylim_raw <- range(y_all, na.rm = TRUE)
+      xlim <- range(x_all_with_error, na.rm = TRUE)
+      
+      ylab <- "Cumulative Mass Depth (g/cm^2)"
+      xlab <- paste(xx, "Accumulation Rate", zz)
+      
+      plot(
+        x1, y1,
+        type = "b",
+        pch = 16,
+        col = "black",
+        xlim = xlim,
+        ylim = rev(ylim_raw),
+        xlab = xlab,
+        ylab = ylab,
+        main = main_title,
+        yaxt = "n"
+      )
+      
+      # Dynamic reversed y-axis
+      axis(
+        side = 2,
+        at = y_scale$breaks,
+        labels = scales::label_number(
+          accuracy = y_scale$accuracy
+        )(y_scale$breaks),
+        las = 2
+      )
+      
+      # CF error bars
+      arrows(
+        x0 = x1 - e1,
+        y0 = y1,
+        x1 = x1 + e1,
+        y1 = y1,
+        angle = 90,
+        code = 3,
+        length = 0.05,
+        col = "black"
+      )
+      
+      # CFCS
+      if (has_CFCS) {
+        
+        points(
+          x2, y2,
+          pch = 16,
+          col = "red"
+        )
+        
+        lines(
+          x2, y2,
+          col = "red"
+        )
+        
+        arrows(
+          x0 = x2 - e2,
+          y0 = y2,
+          x1 = x2 + e2,
+          y1 = y2,
+          angle = 90,
+          code = 3,
+          length = 0.05,
+          col = "red"
+        )
+      }
+      
+      # CA
+      if (has_CA) {
+        
+        points(
+          x3, y3,
+          pch = 16,
+          col = "blue"
+        )
+        
+        lines(
+          x3, y3,
+          col = "blue"
+        )
+        
+        arrows(
+          x0 = x3 - e3,
+          y0 = y3,
+          x1 = x3 + e3,
+          y1 = y3,
+          angle = 90,
+          code = 3,
+          length = 0.05,
+          col = "blue"
+        )
+      }
+      
+      # Legend
+      legend_labels <- c(acc_labels[1])
+      legend_cols   <- c("black")
+      
+      if (has_CFCS) {
+        legend_labels <- c(legend_labels, acc_labels[2])
+        legend_cols   <- c(legend_cols, "red")
+      }
+      
+      if (has_CA) {
+        legend_labels <- c(legend_labels, acc_labels[3])
+        legend_cols   <- c(legend_cols, "blue")
+      }
+      
+      legend(
+        "bottomright",
+        legend = legend_labels,
+        col = legend_cols,
+        lty = 1,
+        pch = 16,
+        bty = "n"
+      )
+    }
+    new_mat_accum_plot_yr <- function() {
+      
+      has_CFCS <- any(!is.na(new_mat_table[, "CFCS Section Age (yr CE)"]))
+      has_CA   <- (CA_valid == TRUE)
+      
+      # CF
+      x1 <- new_mat_table[, acc_labels[1]]
+      y1 <- new_mat_table[, "CF Layer Age (yr CE)"]
+      e1 <- new_mat_table[, acc_labels_unc[1]]
+      
+      # CFCS
+      x2 <- new_mat_table[, acc_labels[2]]
+      y2 <- new_mat_table[, "CFCS Section Age (yr CE)"]
+      e2 <- new_mat_table[, acc_labels_unc[2]]
+      
+      # CA
+      if (has_CA) {
+        x3 <- new_mat_table[, acc_labels[3]]
+        y3 <- new_mat_table[, "CA Section Age (yr CE)"]
+        e3 <- new_mat_table[, acc_labels_unc[3]]
+      }
+      
+      # Combine y values for dynamic y-axis calculation
+      y_all <- c(
+        y1,
+        if (has_CFCS) y2 else NULL,
+        if (has_CA) y3 else NULL
+      )
+      
+      # Combine x values if needed
+      x_all <- c(
+        x1,
+        if (has_CFCS) x2 else NULL,
+        if (has_CA) x3 else NULL
+      )
+      
+      # Include error bars when determining x-axis limits
+      x_all_with_error <- c(
+        x1 - e1,
+        x1 + e1,
+        if (has_CFCS) c(x2 - e2, x2 + e2) else NULL,
+        if (has_CA) c(x3 - e3, x3 + e3) else NULL
+      )
+      
+      # Determine plot limits
+      ylim_raw <- range(y_all, na.rm = TRUE)
+      xlim <- range(x_all_with_error, na.rm = TRUE)
+      
+      # Dynamic y-axis
+      y_scale <- dynamic_scale(
+        data.frame(y = y_all),
+        "y",
+        axis = "base"
+      )
+      
+      ylab <- "Year (CE)"
+      xlab <- paste(xx, "Accumulation Rate", zz)
+      
+      # Main CF plot
+      plot(
+        x1,
+        y1,
+        type = "b",
+        pch = 16,
+        col = "black",
+        xlim = xlim,
+        ylim = ylim_raw,
+        xlab = xlab,
+        ylab = ylab,
+        main = main_title,
+        yaxt = "n"
+      )
+      
+      # Dynamic y-axis
+      axis(
+        side = 2,
+        at = y_scale$breaks,
+        labels = scales::label_number(
+          accuracy = y_scale$accuracy
+        )(y_scale$breaks),
+        las = 2
+      )
+      
+      # CF error bars
+      arrows(
+        x0 = x1 - e1,
+        y0 = y1,
+        x1 = x1 + e1,
+        y1 = y1,
+        angle = 90,
+        code = 3,
+        length = 0.05,
+        col = "black"
+      )
+      
+      # CFCS
+      if (has_CFCS) {
+        
+        points(
+          x2,
+          y2,
+          pch = 16,
+          col = "red"
+        )
+        
+        lines(
+          x2,
+          y2,
+          col = "red"
+        )
+        
+        # CFCS error bars
+        arrows(
+          x0 = x2 - e2,
+          y0 = y2,
+          x1 = x2 + e2,
+          y1 = y2,
+          angle = 90,
+          code = 3,
+          length = 0.05,
+          col = "red"
+        )
+      }
+      
+      # CA
+      if (has_CA) {
+        
+        points(
+          x3,
+          y3,
+          pch = 16,
+          col = "blue"
+        )
+        
+        lines(
+          x3,
+          y3,
+          col = "blue"
+        )
+        
+        # CA error bars
+        arrows(
+          x0 = x3 - e3,
+          y0 = y3,
+          x1 = x3 + e3,
+          y1 = y3,
+          angle = 90,
+          code = 3,
+          length = 0.05,
+          col = "blue"
+        )
+      }
+      
+      # Legend
+      legend_labels <- c(acc_labels[1])
+      legend_cols   <- c("black")
+      
+      if (has_CFCS) {
+        legend_labels <- c(
+          legend_labels,
+          acc_labels[2]
+        )
+        
+        legend_cols <- c(
+          legend_cols,
+          "red"
+        )
+      }
+      
+      if (has_CA) {
+        legend_labels <- c(
+          legend_labels,
+          acc_labels[3]
+        )
+        
+        legend_cols <- c(
+          legend_cols,
+          "blue"
+        )
+      }
+      
+      legend(
+        "bottomright",
+        legend = legend_labels,
+        col = legend_cols,
+        lty = 1,
+        pch = 16,
+        bty = "n"
+      )
+    }
+    # build folder name using the naming convention
+    folder_name <- paste(xx, "Accumulation Rate")
+    
+    # full path in current working directory
+    folder_path <- file.path(getwd(), folder_name)
+    
+    # create folder (won't error if it already exists)
+    dir.create(folder_path, showWarnings = FALSE)
+    
+    # 2. To view on screen
+    new_mat_accum_plot_yr()
+    
+    # 3. To save as PDF in working directory
+    xlab <- paste(xx, "Accumulation Rate by Year")
+    
+    # make a safe filename
+    plot_file_name <- paste0(gsub(" ", "_", xlab), ".pdf")
+    
+    # save the plot
+    pdf(file.path(folder_path, plot_file_name))
+    new_mat_accum_plot_yr()
+    dev.off()
+    
+    
+    # 2. To view on screen
+    new_mat_accum_plot_md()
+    
+    # 3. To save as PDF in working directory
+    xlab <- paste(xx, "Accumulation Rate by Mass Depth")
+    
+    # make a safe filename
+    plot_file_name <- paste0(gsub(" ", "_", xlab), ".pdf")
+    
+    # save the plot
+    pdf(file.path(folder_path, plot_file_name))
+    new_mat_accum_plot_md()
+    dev.off()
+    
+    xlab <- paste(xx, "Accumulation Rate")
+    
+    # turn that into a safe filename (no spaces)
+    file_name <- paste0(gsub(" ", "_", xlab), ".xlsx")
+    
+    # write new_mat_table to Excel in the working directory
+    write_xlsx(
+      list(Sheet1 = as.data.frame(new_mat_table)),
+      path = file.path(folder_path, file_name)
+    )
   }
-  }else{
-    new_mat_table[1:length(new_mat_table[,1]),5]=(-decay_const/summary(changepoint_detection_model_MAR)$coefficients[2, 1])*1000
-  }
-  new_mat_table[,6]=na.omit(CFCS_table[,5])
-}
-  new_mat_table[,7]=new_mat_table[,5]*new_mat_table[,1]
-  new_mat_table[,8]=na.omit(CA_table[,15])*1000
-  new_mat_table[,9]=na.omit(CA_table[,5])
-  new_mat_table[,10]=new_mat_table[,8]*new_mat_table[,1]
-
-
-CA_valid=TRUE
-if(valid_check<0 && material_accum_opt==TRUE){
-  CA_valid=FALSE
-  new_mat_table=new_mat_table[,1:7]
-}
-main_title <- paste(xx, "Accumulation Rate")
-new_mat_accum_plot <- function() {
-  has_CFCS <- any(!is.na(new_mat_table[, 6]))  # CFCS series present?
-  has_CA   <- (ncol(new_mat_table) == 10) && any(!is.na(new_mat_table[, 9]))
-  
-  x1 <- new_mat_table[, 4]; y1 <- new_mat_table[, 3]
-  x2 <- new_mat_table[, 7]; y2 <- new_mat_table[, 6]
-  if (has_CA) {
-    x3 <- new_mat_table[, 10]; y3 <- new_mat_table[, 9]
-  }
-  
-  y_all <- c(y1,
-             if (has_CFCS) y2 else NULL,
-             if (has_CA)   y3 else NULL)
-  x_all <- c(x1,
-             if (has_CFCS) x2 else NULL,
-             if (has_CA)   x3 else NULL)
-  
-  ylim_raw <- range(y_all, na.rm = TRUE)
-  xlim     <- range(x_all, na.rm = TRUE)
-  
-  y_min <- floor(ylim_raw[1]); y_max <- ceiling(ylim_raw[2])
-  yticks <- seq(y_min, y_max, by = 2)
-  
-  ylab <- "Year (CE)"
-  xlab <- paste(xx, "Accumulation Rate", zz)
-  
-  plot(
-    x1, y1,
-    type = "b", pch = 16, col = "black",
-    xlim = xlim, ylim = ylim_raw,
-    xlab = xlab, ylab = ylab,
-    main = main_title, yaxt = "n"
-  )
-  axis(side = 2, at = yticks, labels = yticks, las = 2)
-  
-  if (has_CFCS) {
-    points(x2, y2, pch = 16, col = "red")
-    lines(x2, y2, col = "red")
-  }
-  
-  if (has_CA) {
-    points(x3, y3, pch = 16, col = "blue")
-    lines(x3, y3, col = "blue")
-  }
-  
-  legend_labels <- c(colnames(new_mat_table)[4])
-  legend_cols   <- c("black")
-  
-  if (has_CFCS) {
-    legend_labels <- c(legend_labels, colnames(new_mat_table)[7])
-    legend_cols   <- c(legend_cols, "red")
-  }
-  if (has_CA) {
-    legend_labels <- c(legend_labels, colnames(new_mat_table)[10])
-    legend_cols   <- c(legend_cols, "blue")
-  }
-  
-  legend(
-    "bottomright",
-    legend = legend_labels,
-    col    = legend_cols,
-    lty    = 1,
-    pch    = 16,
-    bty    = "n"
-  )
-}
-
-# build folder name using the naming convention
-folder_name <- paste(xx, "Accumulation Rate")
-
-# full path in current working directory
-folder_path <- file.path(getwd(), folder_name)
-
-# create folder (won't error if it already exists)
-dir.create(folder_path, showWarnings = FALSE)
-
-# 2. To view on screen
-new_mat_accum_plot()
-
-# 3. To save as PDF in working directory
-xlab <- paste(xx, "Accumulation Rate")
-
-# make a safe filename
-plot_file_name <- paste0(gsub(" ", "_", xlab), ".pdf")
-
-# save the plot
-pdf(file.path(folder_path, plot_file_name))
-new_mat_accum_plot()
-dev.off()
-xlab <- paste(xx, "Accumulation Rate")
-
-# turn that into a safe filename (no spaces)
-file_name <- paste0(gsub(" ", "_", xlab), ".xlsx")
-
-# write new_mat_table to Excel in the working directory
-write_xlsx(
-  list(Sheet1 = as.data.frame(new_mat_table)),
-  path = file.path(folder_path, file_name)
-)
-}
   mat_accum_finished=readline(prompt = "Accumulation rate calculations complete. Do you wish to calculate accumulation rates for another material (True or False) ")
 }
+
 
 print("modeling complete!")
 
