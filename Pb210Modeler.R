@@ -1924,8 +1924,8 @@ for(i in 1:nrow(concentrations_table)){
 }
 CFCS_table=as.data.frame(CFCS_table)
 
-#generate compaction corrected depths for alternative SAR calculations in CFCS/CA
-zi_correction <- readline(prompt ="Do you want to calculate compaction corrected SAR for CFCS and CA models (TRUE or FALSE)? ")
+#generate compaction corrected depths for alternative SAR calculations
+zi_correction <- readline(prompt ="Do you want to calculate compaction corrected linear depths and dry bulk densities for SAR calculations? (TRUE or FALSE)? ")
 zi_correction <- tolower(trimws(zi_correction))
 if (zi_correction %in% c("true", "t", "yes", "y")) {
   print("select porosity data")
@@ -4036,7 +4036,7 @@ CF_table[,1:2]=mass_table[,1:2]
 CF_table[1:nrow(concentrations_table),3]=concentrations_table[,10]
 CF_table[1:nrow(concentrations_table),4]=concentrations_table[,11]
 CF_table[,12]=mass_table[,4]
-CF_table[,13]=mass_table[,7]
+CF_table[,13]=mass_table[,5]
 #inventory below and uncertainty
 for (i in (nrow(CF_table)):1){
   if (i %% 2 ==1){
@@ -4229,6 +4229,777 @@ for (i in 1:(nrow(CF_table)-2)){
   if (i %% 2 ==1){
     CF_table[i,17]=CF_table[i,16]*sqrt((CF_table[i,11]/CF_table[i,10])^2+(CF_table[i,15]/CF_table[i,14])^2)
   }
+}
+if (exists("zi_correction_table")){
+# ============================================================
+# CF/CRS LAYER-LEVEL COMPACTION CORRECTION
+# ============================================================
+#
+# Reconstructs depositional layer DBD and calculates
+# compaction-corrected CF/CRS SAR.
+#
+# Original CF_table and mass_table remain unchanged.
+#
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. VALIDATE REQUIRED INPUTS
+# ------------------------------------------------------------
+
+n_sections <- length(section_rows)
+
+# CF/CRS infinitesimal layer rows
+layer_rows <- seq(1, nrow(CF_table) - 2, by = 2)
+
+n_layers <- length(layer_rows)
+
+# Section midpoint depths
+section_depths <- as.numeric(
+  mass_table[section_rows, "Mid Depth zi cm"]
+)
+
+# Layer boundary depths
+layer_depths <- as.numeric(
+  CF_table[layer_rows, "Top of Interval z(i) cm"]
+)
+
+# Section porosity
+phi_sections <- as.numeric(
+  zi_correction_table[
+    section_rows, "Porosity"
+  ]
+)
+
+# ------------------------------------------------------------
+# 2. EXTRACT ORIGINAL CF/CRS LAYER VALUES
+# ------------------------------------------------------------
+
+MAR_original <- as.numeric(
+  CF_table[layer_rows, 10]
+)
+
+uMAR_original <- as.numeric(
+  CF_table[layer_rows, 11]
+)
+
+DBD_layer_original <- as.numeric(
+  CF_table[layer_rows, 14]
+)
+
+uDBD_layer_original <- as.numeric(
+  CF_table[layer_rows, 15]
+)
+
+SAR_original <- as.numeric(
+  CF_table[layer_rows, 16]
+)
+
+uSAR_original <- as.numeric(
+  CF_table[layer_rows, 17]
+)
+
+Age_original <- as.numeric(
+  CF_table[layer_rows, 7]
+)
+
+Year_original <- as.numeric(
+  CF_table[layer_rows, 9]
+)
+
+if (any(!is.finite(MAR_original)) ||
+    any(!is.finite(uMAR_original)) ||
+    any(!is.finite(DBD_layer_original)) ||
+    any(DBD_layer_original <= 0)) {
+  stop("Invalid original CF/CRS MAR or layer DBD.")
+}
+
+
+# ------------------------------------------------------------
+# 3. INTERPOLATE PRESENT-DAY LAYER POROSITY
+# ------------------------------------------------------------
+#
+# Interpolation uses actual linear depth.
+#
+# At the surface:
+# phi_layer(0) = phi_0
+#
+# At all other layer depths:
+# Linear interpolation between section midpoints.
+#
+# W_phi maps:
+# [phi_section(1), ..., phi_section(n), phi_0]
+# onto the infinitesimal layer porosities.
+#
+# ------------------------------------------------------------
+
+W_phi_layer <- matrix(
+  0,
+  nrow = n_layers,
+  ncol = n_sections + 1
+)
+
+for (i in seq_len(n_layers)) {
+  
+  z <- layer_depths[i]
+  
+  # Surface layer
+  
+  if (abs(z) < 1e-10) {
+    
+    W_phi_layer[i, n_sections + 1] <- 1
+    
+  } else {
+    
+    # Find the two section midpoints bounding this depth
+    
+    j <- findInterval(z, section_depths)
+    
+    if (j < 1 || j >= n_sections) {
+      stop(paste(
+        "Layer depth falls outside the section midpoint range:",
+        z
+      ))
+    }
+    
+    k <- j + 1
+    
+    fraction <- (
+      z - section_depths[j]
+    ) / (
+      section_depths[k] - section_depths[j]
+    )
+    
+    if (!is.finite(fraction) ||
+        fraction < 0 || fraction > 1) {
+      stop(paste(
+        "Invalid porosity interpolation fraction at layer", i
+      ))
+    }
+    
+    W_phi_layer[i, j] <- 1 - fraction
+    W_phi_layer[i, k] <- fraction
+  }
+}
+
+
+# Calculate interpolated layer porosity
+
+phi_layer <- as.numeric(
+  W_phi_layer %*%
+    c(phi_sections, phi_0)
+)
+
+
+# ------------------------------------------------------------
+# 4. PROPAGATE LAYER POROSITY COVARIANCE
+# ------------------------------------------------------------
+
+Sigma_phi_layer <- W_phi_layer %*%
+  Sigma_input %*%
+  t(W_phi_layer)
+
+Sigma_phi_layer <- (
+  Sigma_phi_layer + t(Sigma_phi_layer)
+) / 2
+
+u_phi_layer <- sqrt(
+  pmax(diag(Sigma_phi_layer), 0)
+)
+
+
+# Preserve covariance between layer porosity and phi_0
+
+W_phi_augmented <- rbind(
+  W_phi_layer,
+  c(rep(0, n_sections), 1)
+)
+
+Sigma_phi_augmented <- W_phi_augmented %*%
+  Sigma_input %*%
+  t(W_phi_augmented)
+
+Sigma_phi_augmented <- (
+  Sigma_phi_augmented +
+    t(Sigma_phi_augmented)
+) / 2
+
+
+# ------------------------------------------------------------
+# 5. CONSTRUCT LAYER DBD COVARIANCE
+# ------------------------------------------------------------
+#
+# The first layer uses the independently estimated
+# present-day surface DBD.
+#
+# Remaining layer DBD values are interpolated between
+# section midpoint DBD values.
+#
+# Where available, use the full section DBD covariance
+# from the preceding DBD correction block.
+#
+# Otherwise, use the section DBD uncertainties as
+# independent measurements.
+#
+# ------------------------------------------------------------
+
+DBD_sections <- as.numeric(
+  mass_table[section_rows,
+             "Dry Bulk Density DBD gcm^-3"]
+)
+
+uDBD_sections <- as.numeric(
+  mass_table[section_rows,
+             "Dry Bulk Density Uncertainty u(DBD) gcm^-3"]
+)
+
+
+# Section DBD covariance
+
+if (exists("Sigma_DBD_present")) {
+  
+  Sigma_DBD_sections <- Sigma_DBD_present
+  
+} else {
+  
+  Sigma_DBD_sections <- diag(
+    uDBD_sections^2,
+    nrow = n_sections,
+    ncol = n_sections
+  )
+}
+
+
+# Surface DBD and uncertainty
+
+DBD_surface <- as.numeric(DBD_layer_original[1])
+
+uDBD_surface <- as.numeric(uDBD_layer_original[1])
+
+if (!is.finite(DBD_surface) ||
+    !is.finite(uDBD_surface) ||
+    DBD_surface <= 0 ||
+    uDBD_surface < 0) {
+  stop("Invalid surface DBD or uncertainty.")
+}
+
+
+# Layer DBD interpolation matrix
+#
+# Input order:
+# [surface DBD, section DBD(1), ..., section DBD(n)]
+
+W_DBD_layer <- matrix(
+  0,
+  nrow = n_layers,
+  ncol = n_sections + 1
+)
+
+for (i in seq_len(n_layers)) {
+  
+  z <- layer_depths[i]
+  
+  if (abs(z) < 1e-10) {
+    
+    W_DBD_layer[i, 1] <- 1
+    
+  } else {
+    
+    j <- findInterval(z, section_depths)
+    
+    if (j < 1 || j >= n_sections) {
+      stop(paste(
+        "Layer depth falls outside DBD interpolation range:",
+        z
+      ))
+    }
+    
+    k <- j + 1
+    
+    fraction <- (
+      z - section_depths[j]
+    ) / (
+      section_depths[k] - section_depths[j]
+    )
+    
+    W_DBD_layer[i, j + 1] <- 1 - fraction
+    W_DBD_layer[i, k + 1] <- fraction
+  }
+}
+
+
+# Input DBD covariance
+
+Sigma_DBD_layer_input <- matrix(
+  0,
+  nrow = n_sections + 1,
+  ncol = n_sections + 1
+)
+
+Sigma_DBD_layer_input[1, 1] <- uDBD_surface^2
+
+Sigma_DBD_layer_input[
+  2:(n_sections + 1),
+  2:(n_sections + 1)
+] <- Sigma_DBD_sections
+
+
+# Layer DBD covariance
+
+Sigma_DBD_layer_present <- W_DBD_layer %*%
+  Sigma_DBD_layer_input %*%
+  t(W_DBD_layer)
+
+Sigma_DBD_layer_present <- (
+  Sigma_DBD_layer_present +
+    t(Sigma_DBD_layer_present)
+) / 2
+
+uDBD_layer_present <- sqrt(
+  pmax(diag(Sigma_DBD_layer_present), 0)
+)
+
+
+# Check interpolation against existing CF layer DBD
+
+DBD_layer_check <- as.numeric(
+  W_DBD_layer %*%
+    c(DBD_surface, DBD_sections)
+)
+
+if (!isTRUE(all.equal(
+  DBD_layer_check,
+  DBD_layer_original,
+  tolerance = 1e-8
+))) {
+  stop(
+    "Reconstructed layer DBD does not match existing CF_table."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 6. CALCULATE DEPOSITIONAL LAYER DBD
+# ------------------------------------------------------------
+
+DBD_layer_depositional <- DBD_layer_original *
+  (1 - phi_0) / (1 - phi_layer)
+
+
+# ------------------------------------------------------------
+# 7. CONSTRUCT COMBINED INPUT COVARIANCE
+# ------------------------------------------------------------
+#
+# Input vector:
+#
+# [DBD_layer(1:n),
+#  phi_layer(1:n),
+#  phi_0]
+#
+# DBD and porosity measurement errors are assumed
+# independent.
+#
+# ------------------------------------------------------------
+
+Sigma_layer_input <- matrix(
+  0,
+  nrow = 2 * n_layers + 1,
+  ncol = 2 * n_layers + 1
+)
+
+DBD_indices <- seq_len(n_layers)
+
+phi_indices <- (
+  n_layers + 1
+):(2 * n_layers + 1)
+
+Sigma_layer_input[
+  DBD_indices,
+  DBD_indices
+] <- Sigma_DBD_layer_present
+
+Sigma_layer_input[
+  phi_indices,
+  phi_indices
+] <- Sigma_phi_augmented
+
+Sigma_layer_input <- (
+  Sigma_layer_input + t(Sigma_layer_input)
+) / 2
+
+
+# ------------------------------------------------------------
+# 8. JACOBIAN FOR DEPOSITIONAL LAYER DBD
+# ------------------------------------------------------------
+#
+# DBD* = DBD * (1-phi_0)/(1-phi_layer)
+#
+# Derivatives:
+#
+# dDBD*/dDBD = (1-phi_0)/(1-phi_layer)
+#
+# dDBD*/dphi_layer = DBD*/(1-phi_layer)
+#
+# dDBD*/dphi_0 = -DBD*/(1-phi_0)
+#
+# ------------------------------------------------------------
+
+J_layer_DBD <- matrix(
+  0,
+  nrow = n_layers,
+  ncol = 2 * n_layers + 1
+)
+
+for (i in seq_len(n_layers)) {
+  
+  # Present-day layer DBD
+  
+  J_layer_DBD[i, i] <-
+    (1 - phi_0) / (1 - phi_layer[i])
+  
+  # Present-day layer porosity
+  
+  J_layer_DBD[i, n_layers + i] <-
+    DBD_layer_depositional[i] /
+    (1 - phi_layer[i])
+  
+  # Depositional reference porosity
+  
+  J_layer_DBD[i, 2 * n_layers + 1] <-
+    -DBD_layer_depositional[i] /
+    (1 - phi_0)
+}
+
+
+# ------------------------------------------------------------
+# 9. DEPOSITIONAL LAYER DBD COVARIANCE
+# ------------------------------------------------------------
+
+Sigma_DBD_layer_depositional <-
+  J_layer_DBD %*%
+  Sigma_layer_input %*%
+  t(J_layer_DBD)
+
+Sigma_DBD_layer_depositional <- (
+  Sigma_DBD_layer_depositional +
+    t(Sigma_DBD_layer_depositional)
+) / 2
+
+uDBD_layer_depositional <- sqrt(
+  pmax(diag(Sigma_DBD_layer_depositional), 0)
+)
+
+
+# ------------------------------------------------------------
+# 10. CALCULATE CORRECTED SAR
+# ------------------------------------------------------------
+
+SAR_corrected <- MAR_original /
+  DBD_layer_depositional
+
+
+# ------------------------------------------------------------
+# 11. PROPAGATE SAR UNCERTAINTY
+# ------------------------------------------------------------
+#
+# SAR = MAR / DBD_depositional
+#
+# Assumes MAR uncertainty is independent of the
+# reconstructed depositional DBD uncertainty.
+#
+# ------------------------------------------------------------
+
+Sigma_MAR <- diag(
+  uMAR_original^2,
+  nrow = n_layers,
+  ncol = n_layers
+)
+
+Sigma_SAR_input <- matrix(
+  0,
+  nrow = 2 * n_layers,
+  ncol = 2 * n_layers
+)
+
+Sigma_SAR_input[
+  1:n_layers,
+  1:n_layers
+] <- Sigma_MAR
+
+Sigma_SAR_input[
+  (n_layers + 1):(2 * n_layers),
+  (n_layers + 1):(2 * n_layers)
+] <- Sigma_DBD_layer_depositional
+
+
+# SAR Jacobian
+
+J_SAR <- matrix(
+  0,
+  nrow = n_layers,
+  ncol = 2 * n_layers
+)
+
+for (i in seq_len(n_layers)) {
+  
+  # Derivative with respect to MAR
+  
+  J_SAR[i, i] <-
+    1 / DBD_layer_depositional[i]
+  
+  # Derivative with respect to depositional DBD
+  
+  J_SAR[i, n_layers + i] <-
+    -MAR_original[i] /
+    DBD_layer_depositional[i]^2
+}
+
+
+# Full SAR covariance
+
+Sigma_SAR_corrected <-
+  J_SAR %*%
+  Sigma_SAR_input %*%
+  t(J_SAR)
+
+Sigma_SAR_corrected <- (
+  Sigma_SAR_corrected +
+    t(Sigma_SAR_corrected)
+) / 2
+
+uSAR_corrected <- sqrt(
+  pmax(diag(Sigma_SAR_corrected), 0)
+)
+
+
+# ------------------------------------------------------------
+# 12. GENERATE INDEPENDENT CF/CRS CORRECTION TABLE
+# ------------------------------------------------------------
+
+CF_compaction_table <- data.frame(
+  
+  `Top of Interval z(i) cm` =
+    layer_depths,
+  
+  `Mid Depth zi cm` =
+    as.numeric(CF_table[layer_rows, 2]),
+  
+  `Age t(i) yr` =
+    Age_original,
+  
+  `Year CE` =
+    Year_original,
+  
+  `Mass Accumulation Rate MAR g/(cm^2 yr)` =
+    MAR_original,
+  
+  `MAR Uncertainty g/(cm^2 yr)` =
+    uMAR_original,
+  
+  `Present Day Layer DBD g/cm^3` =
+    DBD_layer_original,
+  
+  `Present Day Layer DBD Uncertainty g/cm^3` =
+    uDBD_layer_present,
+  
+  `Present Day Layer Porosity` =
+    phi_layer,
+  
+  `Present Day Layer Porosity Uncertainty` =
+    u_phi_layer,
+  
+  `Depositional Layer DBD g/cm^3` =
+    DBD_layer_depositional,
+  
+  `Depositional Layer DBD Uncertainty g/cm^3` =
+    uDBD_layer_depositional,
+  
+  `Original CF SAR cm/yr` =
+    SAR_original,
+  
+  `Original CF SAR Uncertainty cm/yr` =
+    uSAR_original,
+  
+  `Corrected CF SAR cm/yr` =
+    SAR_corrected,
+  
+  `Corrected CF SAR Uncertainty cm/yr` =
+    uSAR_corrected,
+  
+  `SAR Correction Factor` =
+    DBD_layer_original / DBD_layer_depositional,
+  
+  check.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 13. STORE COVARIANCE MATRICES AS ATTRIBUTES
+# ------------------------------------------------------------
+
+attr(
+  CF_compaction_table,
+  "Layer_Porosity_Interpolation_Weights"
+) <- W_phi_layer
+
+attr(
+  CF_compaction_table,
+  "Layer_Porosity_Covariance"
+) <- Sigma_phi_layer
+
+attr(
+  CF_compaction_table,
+  "Layer_DBD_Interpolation_Weights"
+) <- W_DBD_layer
+
+attr(
+  CF_compaction_table,
+  "Present_Layer_DBD_Covariance"
+) <- Sigma_DBD_layer_present
+
+attr(
+  CF_compaction_table,
+  "Layer_Input_Covariance"
+) <- Sigma_layer_input
+
+attr(
+  CF_compaction_table,
+  "Depositional_Layer_DBD_Jacobian"
+) <- J_layer_DBD
+
+attr(
+  CF_compaction_table,
+  "Depositional_Layer_DBD_Covariance"
+) <- Sigma_DBD_layer_depositional
+
+attr(
+  CF_compaction_table,
+  "Corrected_SAR_Jacobian"
+) <- J_SAR
+
+attr(
+  CF_compaction_table,
+  "Corrected_SAR_Covariance"
+) <- Sigma_SAR_corrected
+
+
+# ------------------------------------------------------------
+# 14. EXPORT RESULTS
+# ------------------------------------------------------------
+
+folder_name_compaction <- "CF CRS Compaction Correction"
+
+dir.create(
+  folder_name_compaction,
+  showWarnings = FALSE,
+  recursive = TRUE
+)
+
+write_xlsx(
+  CF_compaction_table,
+  file.path(
+    folder_name_compaction,
+    "CF_CRS_compaction_corrected.xlsx"
+  )
+)
+
+
+# Export covariance matrices
+
+CF_covariance_output <- list(
+  
+  `Layer Porosity` =
+    as.data.frame(Sigma_phi_layer),
+  
+  `Present Layer DBD` =
+    as.data.frame(Sigma_DBD_layer_present),
+  
+  `Depositional Layer DBD` =
+    as.data.frame(Sigma_DBD_layer_depositional),
+  
+  `Corrected SAR` =
+    as.data.frame(Sigma_SAR_corrected),
+  
+  `Porosity Interpolation Weights` =
+    as.data.frame(W_phi_layer),
+  
+  `DBD Interpolation Weights` =
+    as.data.frame(W_DBD_layer)
+)
+
+write_xlsx(
+  CF_covariance_output,
+  file.path(
+    folder_name_compaction,
+    "CF_CRS_compaction_covariance.xlsx"
+  )
+)
+# Depositional SAR plot
+
+pdf(
+  file.path(
+    folder_name_compaction,
+    "Depositional_SAR_plot.pdf"
+  ),
+  width = 8,
+  height = 6
+)
+
+SAR_depositional_plot_table <- data.frame(x = CF_compaction_table[["Corrected CF SAR cm/yr"]],x_uncertainty = CF_compaction_table[["Corrected CF SAR Uncertainty cm/yr"]],y = CF_compaction_table[["Year CE"]])
+
+SAR_depositional_plot_table <- na.omit(
+  SAR_depositional_plot_table
+)
+
+SAR_depositional_plot_table <- SAR_depositional_plot_table[
+  order(SAR_depositional_plot_table$y),
+]
+
+SAR_depositional_plot <- ggplot() +
+  
+  geom_point(
+    data = SAR_depositional_plot_table,
+    aes(x = x, y = y)
+  ) +
+  
+  geom_path(
+    data = SAR_depositional_plot_table,
+    aes(x = x, y = y),
+    color = "blue"
+  ) +
+  
+  geom_errorbar(
+    data = SAR_depositional_plot_table,
+    aes(
+      y = y,
+      xmin = x - x_uncertainty,
+      xmax = x + x_uncertainty
+    ),
+    width = 0.2
+  ) +
+  
+  labs(
+    title = "Depositional Sediment Accumulation Rate by Year",
+    x = "Depositional Sediment Accumulation Rate (cm/yr)",
+    y = "Year (CE)"
+  ) +
+  
+  dynamic_scale(
+    SAR_depositional_plot_table,
+    "x"
+  ) +
+  
+  dynamic_scale(
+    SAR_depositional_plot_table,
+    "y",
+    axis = "y"
+  ) +
+  
+  theme_minimal()
+
+print(SAR_depositional_plot)
+
+dev.off()
 }
 
 #save the data
@@ -4512,9 +5283,7 @@ dev.off()
 CF_comp_md_table=as.matrix(array(data=NA, dim=c((nrow(concentrations_table)/2),2)))
 CF_comp_md_table[,1]=na.omit(mass_table[,10])
 CF_comp_md_table[,2]=na.omit(CF_table[,9])
-#CF_comp_md_table=na.omit(as.matrix(concentrations_table[, c("Mass Depth Section mi gcm^-2", "CF Age (CE)")]))
 #CFCS table for mass depth plot
-#CFCS_comp_md_table=na.omit(as.matrix(mass_table[, c("Cumulative Mass Depth Layer m(i) gcm^-2", "CFCS Age (CE)")]))
 CFCS_comp_md_table=as.matrix(array(data=NA, dim=c((nrow(concentrations_table)/2),2)))
 CFCS_comp_md_table[,1]=na.omit(mass_table[1:(nrow(mass_table)-2),8])
 CFCS_comp_md_table[,2]=na.omit(CFCS_table[,5])
