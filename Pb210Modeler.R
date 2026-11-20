@@ -762,8 +762,9 @@ if (alpha_or_gamma==TRUE){
       while(accept_new_background==FALSE){
         cat(sprintf("poor background selection detected! negative excess Pb-210 activity at index: %f\n",check_for_negs))
         accept_new_background=readline(prompt = "Accept new background determination from this index? (True) ")
-        background_value=mean(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))
-        background_value_uncer=sd(na.omit(concentrations_table[check_for_negs:nrow(concentrations_table),2]))/sqrt(test_length_finder)
+        background_values <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table), 2])
+        background_value <- mean(background_values)
+        background_value_uncer <- sd(background_values) / sqrt(length(background_values))
         first_background=check_for_negs
       }
     }else{
@@ -965,7 +966,7 @@ elapsed_days = as.numeric(measurement_dates - collection_date)
 elapsed_time = elapsed_days / days_per_year
 
 if (any(elapsed_time < 0)) {
-  stop("A measurement date occurs after the reference date.")
+  stop("A measurement date occurs before the reference date.")
 }
 
 # Calculate decay correction factor
@@ -4212,16 +4213,6 @@ for (i in 1:(nrow(CF_table)-2)){
     CF_table[i,16]=CF_table[i,10]/CF_table[i,14]
   }
 }
-# DBD section uncertainty
-for (i in 1:(nrow(CF_table)-2)){
-  if (i %% 2 ==1){
-    if (i==1){
-      CF_table[i,15]=DBD_layer_uncer
-    }else{
-      CF_table[i,15]=sqrt((CF_table[(i+1),13])^2+(CF_table[(i-1),13])^2)/2
-    }
-  }
-}
 
 #SAR uncertainty loop
 for (i in 1:(nrow(CF_table)-2)){
@@ -5369,7 +5360,7 @@ if (est_local_flux==TRUE){
   lat_band=as.numeric(readline(prompt = "Enter core latitude (indicate southern latitude with -) "))
   precip_mm=as.numeric(readline(prompt = "Enter local annual precipitation (mm) "))
   for (i in 1:15){
-    if (lat_band>= flux_table[i,1] & lat_band<=flux_table[i,2]){
+    if (lat_band >= min(flux_table[i,1], flux_table[i,2]) & lat_band <= max(flux_table[i,1], flux_table[i,2])) {
       flux_est=flux_table[i,3]*precip_mm+flux_table[i,4]
       flux_est=(flux_est*60)/10000
       flux_est_unc=sqrt((precip_mm*flux_table[i,5])^2+flux_table[i,6]^2)
@@ -5390,7 +5381,7 @@ print("core-derived atmospheric Pb-210 flux (dpm cm^2/yr)")
 atm_flux=as.numeric(CF_table[1,5]*decay_const)
 atm_flux_uncer=atm_flux*sqrt((as.numeric(CF_table[1,6])/as.numeric(CF_table[1,5]))^2+(decay_const_uncer/decay_const)^2)
 print(atm_flux)
-flux_table=array(data=NA, dim=c(1,4), dimnames=list(NULL, c("Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))","Estimated Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Estimate Pearson's r square")))
+flux_table=array(data=NA, dim=c(1,4), dimnames=list(NULL, c("Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))","Estimated Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Estimated Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))")))
 flux_table[1,1]=atm_flux
 flux_table[1,2]=atm_flux_uncer
 flux_table[1,3]=insert_results[1]
@@ -5844,11 +5835,14 @@ print(MAR_plot_CA)
 dev.off()
 #age-depth plot
 pdf(file.path(folder_name4, "age_vs_mid_depth.pdf"), width = 8, height = 6)
-CA_age_table = array(data = NA, dim = c(length(na.omit(CA_table[, 5])), 3), dimnames = list(NULL, c("y", "x_uncertainty", "x")))
-CA_age_table[, 1] = na.omit(CA_table[, 1])
-CA_age_table[, 2] = na.omit(CA_table[, 4])
-CA_age_table[, 3] = na.omit(CA_table[, 5])
-CA_age_table = as.data.frame(CA_age_table)
+CA_rows <- seq(2, nrow(CA_table)-1, by=2)
+
+CA_age_table <- data.frame(
+  y = CA_table[CA_rows, 1],
+  x_uncertainty = CA_table[CA_rows, 4],
+  x = CA_table[CA_rows, 5]
+)
+CA_age_table <- na.omit(CA_age_table)
 
 CA_age_table_plot <- ggplot(
   CA_age_table,
@@ -5885,11 +5879,13 @@ dev.off()
 
 #age mass-depth plot
 pdf(file.path(folder_name4, "age_vs_mass_depth.pdf"), width = 8, height = 6)
-CA_age_md_table = array(data = NA, dim = c(length(na.omit(CA_table[, 5])), 3), dimnames = list(NULL, c("y", "x_uncertainty", "x")))
-CA_age_md_table[, 1] = na.omit(CA_table[, 17])
-CA_age_md_table[, 2] = na.omit(CA_table[, 4])
-CA_age_md_table[, 3] = na.omit(CA_table[, 5])
-CA_age_md_table = as.data.frame(CA_age_md_table)
+CA_age_md_table <- data.frame(
+  y = CA_table[CA_rows, 17],
+  x_uncertainty = CA_table[CA_rows, 4],
+  x = CA_table[CA_rows, 5]
+)
+
+CA_age_md_table <- na.omit(CA_age_md_table)
 
 CA_age_md_table_plot <- ggplot(
   CA_age_md_table,
@@ -5925,14 +5921,24 @@ print(CA_age_md_table_plot)
 dev.off()
 
 #CA model validity checker
-valid_check=0
-for (i in 1:nrow(CA_table)){
-  if (i%%2==0){
-    valid_check=CA_age_table[i,3]-CA_age_table[(i+2),3]
-    if(valid_check<0){
-      print("Age-inversions detected, CA model assumptions violated! CA is not a valid model")
-      break
-    }
+CA_rows <- seq(2, nrow(CA_table)-1, by=2)
+
+CA_ages <- CA_table[CA_rows, 5]
+
+CA_ages <- CA_ages[is.finite(CA_ages)]
+
+valid_check <- 0
+
+if (length(CA_ages) >= 2) {
+  
+  age_differences <- diff(CA_ages)
+  
+  if (any(age_differences < 0)) {
+    
+    valid_check <- -1
+    
+    print("Age-inversions detected, CA model assumptions violated! CA is not a valid model")
+    
   }
 }
 }
@@ -5976,8 +5982,8 @@ while (mat_accum_finished==TRUE){
     colnames(new_mat_table)=new_column_names_mat_data
     new_mat_table[,"Cumulative Mass Depth Layer m(i) gcm^-2"]=mass_table[1:nrow(new_mat_table),8]
     new_mat_table[,"Mass Depth Section mi gcm^-2"]=mass_table[1:nrow(new_mat_table),10]
-    new_mat_table[,"CF Mass Accumulation g/(m^2 yr)"]=CF_table[1:nrow(new_mat_table),10]*1000
-    new_mat_table[,"CF Mass Accumulation Uncertainty g/(m^2 yr)"]=CF_table[1:nrow(new_mat_table),11]*1000
+    new_mat_table[,"CF Mass Accumulation g/(m^2 yr)"]=CF_table[1:nrow(new_mat_table),10]*10000
+    new_mat_table[,"CF Mass Accumulation Uncertainty g/(m^2 yr)"]=CF_table[1:nrow(new_mat_table),11]*10000
     new_mat_table[,"CF Layer Age (yr CE)"]=CF_table[1:nrow(new_mat_table),9]
     #add reformatted data
     for (i in 1:nrow(new_mat_table)){
@@ -6083,8 +6089,8 @@ while (mat_accum_finished==TRUE){
       new_mat_table[,acc_labels_unc[2]]=new_mat_table[,acc_labels[2]]*sqrt((new_mat_table[,"CFCS Mass Accumulation Uncertainty g/(m^2 yr)"]/new_mat_table[,"CFCS Mass Accumulation g/(m^2 yr)"])^2+(new_mat_table[,second_entry]/new_mat_table[,first_entry])^2)
     }
     
-    new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"]=CA_table[1:nrow(new_mat_table),15]*1000
-    new_mat_table[,"CA Mass Accumulation Uncertainty g/(m^2 yr)"]=CA_table[1:nrow(new_mat_table),16]*1000
+    new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"]=CA_table[1:nrow(new_mat_table),15]*10000
+    new_mat_table[,"CA Mass Accumulation Uncertainty g/(m^2 yr)"]=CA_table[1:nrow(new_mat_table),16]*10000
     new_mat_table[,"CA Section Age (yr CE)"]=CA_table[1:nrow(new_mat_table),5]
     new_mat_table[,acc_labels[3]]=new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"]*new_mat_table[,first_entry]
     new_mat_table[,acc_labels_unc[3]]=new_mat_table[,acc_labels[3]]*sqrt((new_mat_table[,"CA Mass Accumulation Uncertainty g/(m^2 yr)"]/new_mat_table[,"CA Mass Accumulation g/(m^2 yr)"])^2+(new_mat_table[,second_entry]/new_mat_table[,first_entry])^2)
