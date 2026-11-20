@@ -6,7 +6,7 @@ script_version <- "1.2"
 
 required_packages <- c(
   "jsonlite", "readxl", "writexl", "ggplot2",
-  "scales", "segmented", "dplyr"
+  "scales", "segmented"
 )
 
 min_versions <- c(
@@ -1479,8 +1479,10 @@ concentrations_file_path <- file.path(folder_name, "concentrations_data.xlsx")
 write_xlsx(as.data.frame(concentrations_table), concentrations_file_path)
 
 #C0CA save
+if (did_measure_C0==FALSE){
 write_xlsx(model_summaries_C0CA_activity, path = "Background corrected mass and concentration data/C0CA_model_summaries.xlsx")
-#missing surface save
+}
+  #missing surface save
 
 if (exists("C1_model_list")){
   write_xlsx(model_summaries_surf_tot_activity, path = "Background corrected mass and concentration data/surf_ex_activity_model_summaries.xlsx")
@@ -2836,7 +2838,7 @@ while (CFCS_modeling_complete==FALSE){
     for (i in 1:number_of_models){
       list_of_models[[i]]=lm(CFCS_table[extents[i]:extents[i+1],3]~CFCS_table[extents[i]:extents[i+1],2], na.action=na.exclude)
       print(paste("Model Adj. R square",i))
-      print(summary(list_of_models[[i]])$adj.r.square)
+      print(summary(list_of_models[[i]])$adj.r.squared)
       print(paste("Model MAR (g/(cm^2 y))",i))
       print(-decay_const/summary(list_of_models[[i]])$coefficients[2, 1])
       MAR_model_plot + geom_line(aes(y = fitted(list_of_models[[i]])), color = i, linewidth = 1)
@@ -2958,7 +2960,7 @@ if (number_of_changepoints>0){
   for (i in 1:number_of_models){
     list_of_models_SAR[[i]]=lm(CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),3]~CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),1], na.action=na.exclude)
     print(paste("Model Adj. R square",i))
-    print(summary(list_of_models_SAR[[i]])$adj.r.square)
+    print(summary(list_of_models_SAR[[i]])$adj.r.squared)
     print(paste("Model SAR (g/(cm^2 yr)",i))
     print(-decay_const/summary(list_of_models_SAR[[i]])$coefficients[2, 1])
     SAR_model_plot + geom_line(aes(y = fitted(list_of_models_SAR[[i]])), color = i, linewidth = 1)
@@ -3108,7 +3110,7 @@ if (exists("zi_correction_table")){
     for (i in 1:number_of_models){
       list_of_models_ccSAR[[i]]=lm(CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),3]~CFCS_table[(extents[i]-(SAZ_depth-1+fixer_var)):(extents[i+1]-(SAZ_depth-1+fixer_var)),7], na.action=na.exclude)
       print(paste("Model Adj. R square",i))
-      print(summary(list_of_models_ccSAR[[i]])$adj.r.square)
+      print(summary(list_of_models_ccSAR[[i]])$adj.r.squared)
       print(paste("Model ccSAR (g/(cm^2 yr)",i))
       print(-decay_const/summary(list_of_models_ccSAR[[i]])$coefficients[2, 1])
       ccSAR_model_plot + geom_line(aes(y = fitted(list_of_models_ccSAR[[i]])), color = i, linewidth = 1)
@@ -3482,7 +3484,7 @@ if (number_of_models==1){
                                                 Std.Error = coefficients[i, "Std. Error"],
                                                 t.value = coefficients[i, "t value"],
                                                 Pr.t = coefficients[i, "Pr(>|t|)"],
-                                                Adj.R.squared = summary_model$adj.r.squared,  # Add R-squared value
+                                                Adj.R.squared = ccsummary_model$adj.r.squared,  # Add R-squared value
                                                 stringsAsFactors = FALSE))
       }
       
@@ -3825,13 +3827,12 @@ age_depth_plot <- ggplot(
   geom_point(
     color = "blue"
   ) +
-  geom_errorbar(
+  geom_errorbarh(
     aes(
       xmin = `Date (CE)` - `Time Uncertainty (yr)`,
-      xmax = `Date (CE)` + `Time Uncertainty (yr)`,
-      y = `zi`
+      xmax = `Date (CE)` + `Time Uncertainty (yr)`
     ),
-    width = 0.2,
+    height = 0.2,
     color = "black"
   ) +
   labs(
@@ -3872,13 +3873,12 @@ if (exists("zi_correction_table")){
     geom_point(
       color = "blue"
     ) +
-    geom_errorbar(
+    geom_errorbarh(
       aes(
         xmin = `Date (CE)` - `Time Uncertainty (yr)`,
-        xmax = `Date (CE)` + `Time Uncertainty (yr)`,
-        y = `zi`
+        xmax = `Date (CE)` + `Time Uncertainty (yr)`
       ),
-      width = 0.2,
+      height = 0.2,
       color = "black"
     ) +
     labs(
@@ -3918,13 +3918,12 @@ age_mass_depth_plot <- ggplot(
   geom_point(
     color = "blue"
   ) +
-  geom_errorbar(
+  geom_errorbarh(
     aes(
       xmin = `Date (CE)` - `Time Uncertainty (yr)`,
-      xmax = `Date (CE)` + `Time Uncertainty (yr)`,
-      y = `mi`
+      xmax = `Date (CE)` + `Time Uncertainty (yr)`
     ),
-    width = 0.2,
+    height = 0.2,
     color = "black"
   ) +
   labs(
