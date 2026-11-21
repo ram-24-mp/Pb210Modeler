@@ -830,25 +830,6 @@ if (alpha_or_gamma==TRUE){
       concentrations_table[i,5]=pb210_data[(i/2),4]
     }
   }
-}
-
-
-# Preserve which section Ci values were originally measured.
-# These are the only section values that should receive ln(Ci).
-original_section_Ci <- !is.na(concentrations_table[, "Total Pb-210 dpm/g"])
-
-original_section_Ci_evens=rep(NA,10)
-for (i in 1:10){
-  original_section_Ci_evens[i]=original_section_Ci[i*2]
-}
-# Section ln(Ci) and u(ln(Ci)) must remain NA when
-# the section Ci was not originally measured.
-for (i in seq(2, nrow(concentrations_table), by = 2)) {
-  if (!original_section_Ci[i]) {
-    concentrations_table[i, "ln(Ci)"] <- NA_real_
-    concentrations_table[i, "u(ln(Ci))"] <- NA_real_
-  }
-}
   self_absorb_corr=readline(prompt="Do you wish to correct total Pb-210 Activity for self absorption? (TRUE or FALSE) ")
   if (self_absorb_corr==TRUE){
     print("select attenuation coefficient data")
@@ -875,7 +856,26 @@ for (i in seq(2, nrow(concentrations_table), by = 2)) {
       correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`
     
   }
+  
+}
 
+
+# Preserve which section Ci values were originally measured.
+# These are the only section values that should receive ln(Ci).
+original_section_Ci <- !is.na(concentrations_table[, "Total Pb-210 dpm/g"])
+
+original_section_Ci_evens=rep(NA,10)
+for (i in 1:10){
+  original_section_Ci_evens[i]=original_section_Ci[i*2]
+}
+# Section ln(Ci) and u(ln(Ci)) must remain NA when
+# the section Ci was not originally measured.
+for (i in seq(2, nrow(concentrations_table), by = 2)) {
+  if (!original_section_Ci[i]) {
+    concentrations_table[i, "ln(Ci)"] <- NA_real_
+    concentrations_table[i, "u(ln(Ci))"] <- NA_real_
+  }
+}
 
 concentrations_table[,6]=concentrations_table[,2]-concentrations_table[,4]
 negative_index=which(concentrations_table[,6]<0)
@@ -1965,7 +1965,7 @@ if (zi_correction %in% c("true", "t", "yes", "y")) {
     zi_correction_table[section_rows[measured_sections], "Porosity Uncertainty"] <-
       measured_phi_sd[measured_sections]
   }
-  measured_porosity=readline(prompt="Do you have a measured surface layer porosity value? (TRUE or FALSE)")
+  measured_porosity=readline(prompt="Do you have a measured surface layer porosity value? (TRUE or FALSE) ")
   
   if (measured_porosity==TRUE){
     
@@ -3828,13 +3828,38 @@ age_depth_plot <- ggplot(
   geom_point(
     color = "blue"
   ) +
-  geom_errorbarh(
+  geom_segment(
     aes(
-      xmin = `Date (CE)` - `Time Uncertainty (yr)`,
-      xmax = `Date (CE)` + `Time Uncertainty (yr)`
+      x = `Date (CE)` - `Time Uncertainty (yr)`,
+      xend = `Date (CE)` + `Time Uncertainty (yr)`,
+      y = zi,
+      yend = zi
     ),
-    height = 0.2,
-    color = "black"
+    color = "black",
+    linewidth = 0.5
+  ) +
+  # Left end caps
+  geom_segment(
+    aes(
+      x = `Date (CE)` - `Time Uncertainty (yr)`,
+      xend = `Date (CE)` - `Time Uncertainty (yr)`,
+      y = zi - 0.1,
+      yend = zi + 0.1
+    ),
+    color = "black",
+    linewidth = 0.5
+  ) +
+  
+  # Right end caps
+  geom_segment(
+    aes(
+      x = `Date (CE)` + `Time Uncertainty (yr)`,
+      xend = `Date (CE)` + `Time Uncertainty (yr)`,
+      y = zi - 0.1,
+      yend = zi + 0.1
+    ),
+    color = "black",
+    linewidth = 0.5
   ) +
   labs(
     title = "Age vs Depth Model",
@@ -3855,7 +3880,6 @@ age_depth_plot <- ggplot(
   theme_minimal()
 
 print(age_depth_plot)
-
 dev.off()
 
 #ccSAR version
@@ -3874,13 +3898,38 @@ if (exists("zi_correction_table")){
     geom_point(
       color = "blue"
     ) +
-    geom_errorbarh(
+    geom_segment(
       aes(
-        xmin = `Date (CE)` - `Time Uncertainty (yr)`,
-        xmax = `Date (CE)` + `Time Uncertainty (yr)`
+        x = `Date (CE)` - `Time Uncertainty (yr)`,
+        xend = `Date (CE)` + `Time Uncertainty (yr)`,
+        y = `Uncompacted Mid-Depth (cm)`,
+        yend = `Uncompacted Mid-Depth (cm)`
       ),
-      height = 0.2,
-      color = "black"
+      color = "black",
+      linewidth = 0.5
+    ) +
+    # Left end caps
+    geom_segment(
+      aes(
+        x = `Date (CE)` - `Time Uncertainty (yr)`,
+        xend = `Date (CE)` - `Time Uncertainty (yr)`,
+        y = `Uncompacted Mid-Depth (cm)` - 0.1,
+        yend = `Uncompacted Mid-Depth (cm)` + 0.1
+      ),
+      color = "black",
+      linewidth = 0.5
+    ) +
+    
+    # Right end caps
+    geom_segment(
+      aes(
+        x = `Date (CE)` + `Time Uncertainty (yr)`,
+        xend = `Date (CE)` + `Time Uncertainty (yr)`,
+        y = `Uncompacted Mid-Depth (cm)` - 0.1,
+        yend = `Uncompacted Mid-Depth (cm)` + 0.1
+      ),
+      color = "black",
+      linewidth = 0.5
     ) +
     labs(
       title = "Age vs Depth Model",
@@ -3901,7 +3950,6 @@ if (exists("zi_correction_table")){
     theme_minimal()
   
   print(age_depth_plot)
-  
   dev.off()
 }
 
@@ -3919,14 +3967,39 @@ age_mass_depth_plot <- ggplot(
   geom_point(
     color = "blue"
   ) +
-  geom_errorbarh(
+  geom_segment(
     aes(
-      xmin = `Date (CE)` - `Time Uncertainty (yr)`,
-      xmax = `Date (CE)` + `Time Uncertainty (yr)`
+      x = `Date (CE)` - `Time Uncertainty (yr)`,
+      xend = `Date (CE)` + `Time Uncertainty (yr)`,
+      y = mi,
+      yend = mi
     ),
-    height = 0.2,
-    color = "black"
+    color = "black",
+    linewidth = 0.5
   ) +
+  # Left end caps
+  geom_segment(
+    aes(
+      x = `Date (CE)` - `Time Uncertainty (yr)`,
+      xend = `Date (CE)` - `Time Uncertainty (yr)`,
+      y = mi - 0.1,
+      yend = mi + 0.1
+    ),
+    color = "black",
+    linewidth = 0.5
+  ) +
+  
+  # Right end caps
+  geom_segment(
+    aes(
+      x = `Date (CE)` + `Time Uncertainty (yr)`,
+      xend = `Date (CE)` + `Time Uncertainty (yr)`,
+      y = mi - 0.1,
+      yend = mi + 0.1
+    ),
+    color = "black",
+    linewidth = 0.5
+  )+
   labs(
     title = "Age vs Mass Depth Model",
     y = "Cumulative Mass Depth (g/cm^2)",
@@ -3948,7 +4021,6 @@ age_mass_depth_plot <- ggplot(
 print(age_mass_depth_plot)
 
 dev.off()
-
 if (surface_active_zone_check==TRUE){
   print("CFCS model assumptions violated! This core has a surface active zone, only the relative ages of the sediment layers below the surface active layer could be calculated, not absolute ages")
   CFCS_table[,5]=NA
@@ -4076,7 +4148,7 @@ for (i in 1:(nrow(CF_table)-2)){
   }
 }
 # surface DBD determination
-has_DBD_0=readline(prompt="Do you have a measured DBD surface value? (TRUE or FALSE)")
+has_DBD_0=readline(prompt="Do you have a measured DBD surface value? (TRUE or FALSE) ")
 
 if (has_DBD_0==TRUE){
   DBD_layer=as.numeric(readline(prompt="Enter DBD (g/cm^3)"))
@@ -4179,7 +4251,7 @@ while (selection_complete==FALSE){
   
   DBD_layer <- summary(best_model)$coefficients[1,1]
   DBD_layer_uncer <- summary(best_model)$coefficients["(Intercept)", "Std. Error"]
-  print("Surface DBD (dpm/g)")
+  print("Surface DBD (g/cm^3)")
   print(unname(DBD_layer))
   selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
 }
@@ -4189,6 +4261,7 @@ for (i in 1:(nrow(CF_table)-2)){
   if (i %% 2 ==1){
     if (i==1){
       CF_table[1,14]=DBD_layer
+      CF_table[1,15]=DBD_layer_uncer
     }else{
       fraction =
         (CF_table[i,"Top of Interval z(i) cm"] -
@@ -5377,7 +5450,7 @@ if (est_local_flux==TRUE){
   }
 }
 finish_CF=FALSE
-print("core-derived atmospheric Pb-210 flux (dpm cm^2/yr)")
+print("core-derived atmospheric Pb-210 flux (dpm/(cm^2 yr)")
 atm_flux=as.numeric(CF_table[1,5]*decay_const)
 atm_flux_uncer=atm_flux*sqrt((as.numeric(CF_table[1,6])/as.numeric(CF_table[1,5]))^2+(decay_const_uncer/decay_const)^2)
 print(atm_flux)
