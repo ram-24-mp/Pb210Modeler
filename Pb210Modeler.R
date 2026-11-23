@@ -771,7 +771,7 @@ if (alpha_or_gamma==TRUE){
       background_value=mean(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))
       background_value_uncer=sd(na.omit(concentrations_table[first_background:nrow(concentrations_table),2]))/sqrt(test_length_finder)
     }
-    if (check_background_length<5){
+    if (test_length_finder<3){
       print("Background selection does not contain enough points! Make a new selection")
       accept_background_determination=FALSE
     }else{
@@ -5438,7 +5438,7 @@ if (est_local_flux==TRUE){
       flux_est=(flux_est*60)/10000
       flux_est_unc=sqrt((precip_mm*flux_table[i,5])^2+flux_table[i,6]^2)
       flux_est_unc=(flux_est_unc*60)/10000
-      cat("Local curve estimate atmospheric Pb-210 flux is ", flux_est, " +/- ", flux_est_unc, " dpm/(cm^2 y)\n")
+      cat("Local curve estimate atmospheric Pb-210 flux is ", flux_est, " +/- ", flux_est_unc, " dpm/(cm^2 yr)\n")
       insert_results=c(flux_est,flux_est_unc)
       break
     }
