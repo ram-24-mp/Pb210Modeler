@@ -173,7 +173,7 @@ load_required_packages(required_packages)
 check_for_script_update(script_version)
 # clean workspace
 rm(list = ls(all.names = TRUE))
-
+#useful functions
 dynamic_scale <- function(table, column_name, n_breaks = 10,
                           axis = "x", reverse = FALSE) {
   
@@ -260,7 +260,22 @@ decimal_year <- function(date) {
     as.numeric(date - year_start) /
     as.numeric(next_year_start - year_start)
 }
-
+read_bool <- function(prompt) {
+  
+  repeat {
+    answer <- tolower(trimws(readline(prompt)))
+    
+    if (answer %in% c("true", "t", "yes", "y", "1")) {
+      return(TRUE)
+    }
+    
+    if (answer %in% c("false", "f", "no", "n", "0")) {
+      return(FALSE)
+    }
+    
+    cat("Invalid response. Please enter True or False.\n")
+  }
+}
 # make a numeric date
 day=as.numeric(readline(prompt = "Enter Day "))
 month=as.numeric(readline(prompt = "Enter Month "))
@@ -272,11 +287,11 @@ collection_date = as.Date(
 )
 numeric_date=decimal_year(collection_date)
 
-interval_constant=readline(prompt = "Is your interval thickness constant (True or False) ")
+interval_constant=read_bool("Is your interval thickness constant (True or False) ")
 # core dimensions, in cm
 if (interval_constant==TRUE){
   print ("Diameter 10.0 +/- 0.1 cm, Interval Thickness 1 cm")
-dim_defaults=readline(prompt = "Accept Core Dimension Defaults (True or False) ")
+dim_defaults=read_bool("Accept Core Dimension Defaults (True or False) ")
 if (dim_defaults==TRUE){
   internal_diameter=10.0
   internal_diameter_uncer=0.1
@@ -328,7 +343,7 @@ for (i in 1:nrow(mass_table)){
     interval_thicknesses_list[i]=as.numeric(readline(prompt = paste("Enter interval thickness ", i, ": ")))
   }
   print ("Diameter 10.0 +/- 0.1 cm")
-  dim_defaults=readline(prompt = "Accept Core Dimension Defaults (True or False) ")
+  dim_defaults=read_bool("Accept Core Dimension Defaults (True or False) ")
   if (dim_defaults==TRUE){
     internal_diameter=10.0
     internal_diameter_uncer=0.1
@@ -516,7 +531,7 @@ concentrations_table[,1]=mass_table[1:nrow(concentrations_table),2]
 concentrations_table[,12]=mass_table[1:nrow(concentrations_table),10]
 concentrations_table[,15]=mass_table[1:nrow(concentrations_table),8]
 # load in Pb-210 data, assign Alpha or Gamma methods, and fill activity data
-alpha_or_gamma=readline(prompt = "Do you wish to enter Alpha data (True or False) ")
+alpha_or_gamma=read_bool("Do you wish to enter Alpha data (True or False) ")
 if (alpha_or_gamma==TRUE){
   print("select Alpha data")
   file_path2=file.choose()
@@ -746,9 +761,7 @@ if (alpha_or_gamma==TRUE){
     
     print(background_table_plot)
     
-    hit_background <- tolower(readline(
-      prompt = "Was equilibrium depth achieved? (True or False) "
-    )) == "true"
+    hit_background <- read_bool("Was equilibrium depth achieved? (True or False) ")
     
     if (hit_background==TRUE){
     first_background=as.numeric(readline(prompt = "At what index does background begin? "))
@@ -761,7 +774,7 @@ if (alpha_or_gamma==TRUE){
       accept_new_background=FALSE
       while(accept_new_background==FALSE){
         cat(sprintf("poor background selection detected! negative excess Pb-210 activity at index: %f\n",check_for_negs))
-        accept_new_background=readline(prompt = "Accept new background determination from this index? (True) ")
+        accept_new_background=read_bool("Accept new background determination from this index? (True or False) ")
         background_values <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table), 2])
         background_value <- mean(background_values)
         background_value_uncer <- sd(background_values) / sqrt(length(background_values))
@@ -780,7 +793,7 @@ if (alpha_or_gamma==TRUE){
     print(background_value)
     print("Background activity uncertainty (dpm/g)")
     print(background_value_uncer)
-    accept_background_determination=readline(prompt = "Accept background determination? (True or False) ")
+    accept_background_determination=read_bool("Accept background determination? (True or False) ")
     }
     }else{
       break
@@ -797,7 +810,7 @@ if (alpha_or_gamma==TRUE){
   concentrations_table=concentrations_table[1:first_background-1,]
   mass_table=mass_table[1:first_background-1,]
   }else{
-    independent_background=readline(prompt = "Do you have an independent estimate of supported Pb-210 activity? (True or False) ")
+    independent_background=read_bool("Do you have an independent estimate of supported Pb-210 activity? (True or False) ")
     if (independent_background==TRUE){
     ind_bkrnd=as.numeric(readline(prompt = "Enter supported activity (dpm/g) "))
     ind_bkrnd_uncer=as.numeric(readline(prompt = "Enter supported activity uncertainty (dpm/g) "))
@@ -830,7 +843,7 @@ if (alpha_or_gamma==TRUE){
       concentrations_table[i,5]=pb210_data[(i/2),4]
     }
   }
-  self_absorb_corr=readline(prompt="Do you wish to correct total Pb-210 Activity for self absorption? (TRUE or FALSE) ")
+  self_absorb_corr=read_bool("Do you wish to correct total Pb-210 Activity for self absorption? (True or False) ")
   if (self_absorb_corr==TRUE){
     print("select attenuation coefficient data")
     self_ab_file_path <- file.choose()
@@ -897,7 +910,7 @@ for (i in 1:nrow(concentrations_table)){
 }
 
 
-perform_decay_corr=readline(prompt = "Do you want to decay correct excess Pb-210 activity? (TRUE or FALSE) ")
+perform_decay_corr=read_bool("Do you want to decay correct excess Pb-210 activity? (True or False) ")
 if (perform_decay_corr==TRUE){
 # ==========================================
 # EXCESS Pb-210 DECAY CORRECTION
@@ -1132,7 +1145,7 @@ while (selection_complete==FALSE){
   C1_uncer <- C1 * log_C1_uncer
   print("Surface Activity (dpm/g)")
   print(unname(C1))
-  selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
+  selection_complete=read_bool("Accept model selection? (True or False) ")
 }  
 }
 
@@ -1220,7 +1233,7 @@ for (i in seq(2, nrow(concentrations_table), by = 2)){
 
 
 #C0CA calculations
-did_measure_C0=readline(prompt = "Do you have a measured surface layer Pb-210 activity C(0)? (True or False) ")
+did_measure_C0=read_bool("Do you have a measured surface layer Pb-210 activity C(0)? (True or False) ")
 if (did_measure_C0==TRUE){
   measured_C0=as.numeric(readline(prompt = "Enter measured C(0) dpm/g "))
   measured_C0_uncer=as.numeric(readline(prompt = "Enter measured C(0) uncertainty dpm/g "))
@@ -1343,7 +1356,7 @@ if (did_measure_C0==TRUE){
     C0CA_uncer <- C0CA*summary(best_model)$coefficients[1, 2]
     print("Surface Activity (dpm/g)")
     print(unname(C0CA))
-    selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
+    selection_complete=read_bool("Accept model selection? (True or False) ")
   }  
 }
 
@@ -1928,9 +1941,8 @@ for(i in 1:nrow(concentrations_table)){
 CFCS_table=as.data.frame(CFCS_table)
 
 #generate compaction corrected depths for alternative SAR calculations
-zi_correction <- readline(prompt ="Do you want to calculate compaction corrected linear depths and dry bulk densities for SAR calculations? (TRUE or FALSE)? ")
-zi_correction <- tolower(trimws(zi_correction))
-if (zi_correction %in% c("true", "t", "yes", "y")) {
+zi_correction <- read_bool("Do you want to calculate compaction corrected linear depths and dry bulk densities for SAR calculations? (True or False) ")
+if (zi_correction==TRUE) {
   print("select porosity data")
   file_path_porosity <- file.choose()
   porosity_data <- read_excel(file_path_porosity,col_names = TRUE,col_types = "numeric", .name_repair = "unique_quiet")
@@ -1965,7 +1977,7 @@ if (zi_correction %in% c("true", "t", "yes", "y")) {
     zi_correction_table[section_rows[measured_sections], "Porosity Uncertainty"] <-
       measured_phi_sd[measured_sections]
   }
-  measured_porosity=readline(prompt="Do you have a measured surface layer porosity value? (TRUE or FALSE) ")
+  measured_porosity=read_bool("Do you have a measured surface layer porosity value? (True or False) ")
   
   if (measured_porosity==TRUE){
     
@@ -2059,9 +2071,7 @@ if (zi_correction %in% c("true", "t", "yes", "y")) {
       print("Estimated surface porosity")
       print(unname(coef(best_model)[1]))
       
-      selection_complete <- readline(
-        prompt = "Accept model selection? (TRUE or FALSE) "
-      )
+      selection_complete <- read_bool( "Accept model selection? (True or False) ")
     }
     
     best_model <- porosity_model_list[[best_model_index]]
@@ -2557,7 +2567,7 @@ SAZ_depth=0
     attributes(temp_surface_table)$na.action <- NULL
     print(temp_surface_table)
     
-    surface_active_zone_check = readline(prompt = "Does this core have a surface active zone? (True or False) ")
+    surface_active_zone_check = read_bool( "Does this core have a surface active zone? (True or False) ")
     
     if (tolower(surface_active_zone_check) == "false") {
       SAZ_determination_complete = TRUE
@@ -2570,7 +2580,7 @@ SAZ_depth=0
         next
       }
       
-      accept_determination = readline(prompt = "Accept current surface active zone determination? (True or False) ")
+      accept_determination = read_bool( "Accept current surface active zone determination? (True or False) ")
       
       if (tolower(accept_determination) == "true") {
         # Only trim the CFCS_table after acceptance
@@ -2781,7 +2791,7 @@ while (CFCS_modeling_complete==FALSE){
       print("model assumptions violated! Negative MAR generated, choose different MAR model fit")
     }
   }
-  CFCS_manual_eval=readline(prompt = "Do you wish to manually set CFCS models? (True or False) ")
+  CFCS_manual_eval=read_bool( "Do you wish to manually set CFCS models? (True or False) ")
   if (CFCS_manual_eval==TRUE){
     MAR_model_plot <- ggplot(
       CFCS_table,
@@ -2909,7 +2919,7 @@ while (CFCS_modeling_complete==FALSE){
     
     print(MAR_model_plot)
   }
-  CFCS_modeling_complete=readline(prompt = "Do you wish to accept current CFCS model(s)? (True or False) ")
+  CFCS_modeling_complete=read_bool( "Do you wish to accept current CFCS model(s)? (True or False) ")
 }
 print("SAR modeling")
 
@@ -3291,7 +3301,7 @@ if (number_of_models>=2){
 }
 
 if(surface_active_zone_check==TRUE){
-  has_known_age=readline(prompt = "Does one of your intervals have an independent age marker? (TRUE or FALSE) ")
+  has_known_age=read_bool( "Does one of your intervals have an independent age marker? (True or False) ")
     if (has_known_age==TRUE){
       known_age_depth=as.numeric(readline(prompt = "Enter marker depth (cm) "))
       known_age_CE=as.numeric(readline(prompt = "Enter marker age (CE) "))
@@ -4030,13 +4040,13 @@ if (exists("hit_background") && !hit_background) {
   print("CFCS model assumptions violated! Supported Pb-210 activity is unknown, CFCS is not a valid model")
 }
 inventory_completed=FALSE
-missing_inventory_method=readline(prompt = "Can CFCS be used to complete missing inventory? (TRUE or FALSE) ")
+missing_inventory_method=read_bool( "Can CFCS be used to complete missing inventory? (True or False) ")
 if (missing_inventory_method==TRUE){
   missing_inventory=(concentrations_table[(nrow(concentrations_table)),6]*(-decay_const/MAR_final_slope))/decay_const
   missing_inventory_uncer=missing_inventory*sqrt((decay_const_uncer/decay_const)^2+(MAR_final_err/MAR_final)^2+(concentrations_table[nrow(concentrations_table),7]/concentrations_table[nrow(concentrations_table),6])^2)
 inventory_completed=TRUE
   }else{
-ref_date_check=readline(prompt = "Do you have an independent chronometer reference date for a sediment layer? (TRUE or FALSE) ")  
+ref_date_check=read_bool("Do you have an independent chronometer reference date for a sediment layer? (True or False) ")  
 if (ref_date_check==TRUE){
   ref_date=as.numeric(readline(prompt = "Enter reference age (CE) "))
   ref_depth=as.numeric(readline(prompt = "Enter reference date depth (cm) "))
@@ -4083,7 +4093,7 @@ if (ref_date_check==TRUE){
   
 inventory_completed=TRUE
   }else{
-ind_MAR_check=readline(prompt = "Do you have an independent estimate of MAR at the bottom of the sediment core? (TRUE or FALSE) ")
+ind_MAR_check=read_bool("Do you have an independent estimate of MAR at the bottom of the sediment core? (True or False) ")
 if (ind_MAR_check==TRUE){
   independent_MAR_num=as.numeric(readline(prompt = "Enter MAR (g/(cm^2 yr)) "))
   independent_MAR_num_uncer=as.numeric(readline(prompt = "Enter MAR uncertainty (g/(cm^2 yr)) "))
@@ -4098,7 +4108,7 @@ if (inventory_completed==FALSE){
   missing_inventory_uncer=0
 }
 
-finish_CFCS=readline(prompt = "CFCS modeling complete. Continue to CF? (True or False) ")
+finish_CFCS=read_bool("CFCS modeling complete. Continue to CF? (True or False) ")
 #start of CF section
 if (finish_CFCS==TRUE){
 #create CF table and begin populating it
@@ -4148,7 +4158,7 @@ for (i in 1:(nrow(CF_table)-2)){
   }
 }
 # surface DBD determination
-has_DBD_0=readline(prompt="Do you have a measured DBD surface value? (TRUE or FALSE) ")
+has_DBD_0=read_bool("Do you have a measured DBD surface value? (True or False) ")
 
 if (has_DBD_0==TRUE){
   DBD_layer=as.numeric(readline(prompt="Enter DBD (g/cm^3)"))
@@ -4253,7 +4263,7 @@ while (selection_complete==FALSE){
   DBD_layer_uncer <- summary(best_model)$coefficients["(Intercept)", "Std. Error"]
   print("Surface DBD (g/cm^3)")
   print(unname(DBD_layer))
-  selection_complete=readline(prompt = "Accept model selection? (TRUE or FALSE) ")
+  selection_complete=read_bool( "Accept model selection? (True or False) ")
 }
 }
 #DBD loop
@@ -5417,9 +5427,7 @@ write_xlsx(as.data.frame(CF_CFCS_table), "CF_CFCS model comparisons/CF_CFCS_tabl
 
 # Zhang atm flux section
 insert_results=c(NA,NA)
-est_local_flux <- as.logical(readline(
-  prompt = "Do you want to to estimate local atmospheric flux? (TRUE/FALSE): "
-))
+est_local_flux <- read_bool( "Do you want to to estimate local atmospheric flux? (True or False) ")
 if (est_local_flux==TRUE){
   flux_table <- data.frame(
     `Lower Latitudinal Bound` = c(70, 60, 50, 40, 30, 20, 10, 0, -20, -30, -40, -50, -70, -80, -90),
@@ -5482,7 +5490,7 @@ write_xlsx(as.data.frame(flux_table), flux_table_path)
   if (inventory_completed==FALSE){
     print("Could not complete inventory! CF is not a valid model")
   }
-  finish_CF=readline(prompt = "CF modeling complete. Continue to CA? (True or False) ")
+  finish_CF=read_bool("CF modeling complete. Continue to CA? (True or False) ")
 
 
 # save the core boundary issues (SAZ and missing inventory)
@@ -5499,7 +5507,7 @@ core_boundary_info[1,4]=(missing_inventory/CF_table[1,5])*100
 boundary_table_path <- file.path(folder_name3, "core_boundary_info.xlsx")
 write_xlsx(as.data.frame(core_boundary_info), boundary_table_path)
 }else{
-  finish_CF=readline(prompt = "CF modeling skipped. Do you want to continue to CA? (True or False) ")
+  finish_CF=read_bool("CF modeling skipped. Do you want to continue to CA? (True or False) ")
 }
 
 #start of CA section
@@ -6017,7 +6025,7 @@ if (length(CA_ages) >= 2) {
 }
 #optional accumulation rate calculator for other materials in a core
 material_filepaths=c()
-material_accum_opt=readline(prompt = "CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True or False) ")
+material_accum_opt=read_bool("CA modeling complete. Do you wish to calculate accumulation rates for other materials present in the core? (True or False) ")
 mat_accum_finished=TRUE
 while (mat_accum_finished==TRUE){
   
@@ -6580,7 +6588,7 @@ while (mat_accum_finished==TRUE){
       path = file.path(folder_path, file_name)
     )
   }
-  mat_accum_finished=readline(prompt = "Accumulation rate calculations complete. Do you wish to calculate accumulation rates for another material (True or False) ")
+  mat_accum_finished=read_bool("Accumulation rate calculations complete. Do you wish to calculate accumulation rates for another material (True or False) ")
 }
 
 
