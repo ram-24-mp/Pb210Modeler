@@ -513,13 +513,13 @@ for (i in 1:nrow(mass_table)){
   }
 }
 # mass depth section 
-for (i in 1:nrow(mass_table)-1){
+for (i in 1:(nrow(mass_table)-1)){
   if (i %% 2 == 0) {
     mass_table[i,10]=mass_table[i,6]*0.5+mass_table[(i-1),8]
   }
 }
 # mass depth section uncertainty 
-for (i in 1:nrow(mass_table)-1){
+for (i in 1:(nrow(mass_table)-1)){
   if (i %% 2 == 0) {
     mass_table[i,11]= sqrt(mass_table[(i-1),9]^2+(0.5*mass_table[i,7])^2)
   }
@@ -855,7 +855,7 @@ if (alpha_or_gamma==TRUE){
     )
     correction_summary <- as.data.frame(matrix(NA, nrow = nrow(attenuation_data) * 2, ncol = ncol(attenuation_data)))
     
-    colnames(correction_summary) <- colnames(attenuation_data)
+    colnames(correction_summary) <- c("Attenuation Coefficient", "Attenuation Coefficient Uncertainty")
     
     correction_summary[seq(2, nrow(correction_summary), by = 2), ] <- attenuation_data
     correction_summary$`Original Total Activity (dpm/g)`=concentrations_table[,2]
