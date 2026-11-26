@@ -566,7 +566,7 @@ if (alpha_or_gamma==TRUE){
   #start of background auto detection
   background_table=matrix(nrow=nrow(pb210_data), ncol=3)
   background_table=as.data.frame(background_table)
-  pb210_data_auto_bkrnd=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("y","x", "x_uncertainty")))
+  pb210_data_auto_bkrnd=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("y","x", "x_uncertainty")))
   for (i in 1:nrow(concentrations_table)){
     if (i%%2==0){
       background_table[i/2,1]=concentrations_table[i,1]
@@ -736,7 +736,7 @@ if (alpha_or_gamma==TRUE){
     colnames(df) <- "Pb-210 Activity (dpm/g)"
     # Print the data frame
     print(df)
-    background_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y", "x_uncertainty")))
+    background_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y", "x_uncertainty")))
     for (i in 1:nrow(concentrations_table)){
       if (i%%2==0){
         background_table[i/2,1]=concentrations_table[i,2]
@@ -790,7 +790,7 @@ if (alpha_or_gamma==TRUE){
       accept_new_background=FALSE
       while(accept_new_background==FALSE){
         cat(sprintf("poor background selection detected! negative excess Pb-210 activity at index: %f\n",check_for_negs))
-        accept_new_background=read_bool("Accept new background determination from this index? (True or False) ")
+        accept_new_background=read_bool("Enter True to calculate background from new index. ")
         background_values <- na.omit(concentrations_table[check_for_negs:nrow(concentrations_table), 2])
         background_value <- mean(background_values)
         background_value_uncer <- sd(background_values) / sqrt(length(background_values))
@@ -824,7 +824,7 @@ if (alpha_or_gamma==TRUE){
     }
   
   concentrations_table=concentrations_table[1:(first_background-1),]
-  mass_table=mass_table[1:(first_background-1),]
+  mass_table=mass_table[1:first_background,]
   }else{
     independent_background=read_bool("Do you have an independent estimate of supported Pb-210 activity? (True or False) ")
     if (independent_background==TRUE){
@@ -907,7 +907,7 @@ concentrations_table[,6]=concentrations_table[,2]-concentrations_table[,4]
 negative_index=which(concentrations_table[,6]<0)
 if (length(negative_index) > 0) {
   concentrations_table=concentrations_table[1:(negative_index[1]-1),]
-  mass_table=mass_table[1:(negative_index[1]-1),]
+  mass_table=mass_table[1:negative_index[1],]
   original_section_Ci = original_section_Ci[1:nrow(concentrations_table)]
 }
 if (is.na(concentrations_table[nrow(concentrations_table),1])==TRUE){
@@ -1564,7 +1564,7 @@ dev.off()
 print(dbd_plot)
 # excess pb-210
 pdf(file.path(folder_name, "excess_pb210.pdf"), width = 8, height = 6)
-epb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+epb210_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 epb210_plotting_table[,1]=na.omit(concentrations_table[,6])
 epb210_plotting_table[,2]=na.omit(concentrations_table[,1])
 epb210_plotting_table[,3]=na.omit(concentrations_table[,7])
@@ -1602,7 +1602,7 @@ print(epb210_plot)
 dev.off()
 # supported pb-210
 pdf(file.path(folder_name, "supported_pb210.pdf"), width = 8, height = 6)
-spb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+spb210_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 spb210_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),4]
 spb210_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),1]
 spb210_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),5]
@@ -1640,7 +1640,7 @@ print(spb210_plot)
 dev.off()
 # total pb-210
 pdf(file.path(folder_name, "total_pb210.pdf"), width = 8, height = 6)
-tpb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+tpb210_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 tpb210_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),2]
 tpb210_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),1]
 tpb210_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),3]
@@ -1678,7 +1678,7 @@ print(tpb210_plot)
 dev.off()
 # total log scale pb-210
 pdf(file.path(folder_name, "excess_log_pb210.pdf"), width = 8, height = 6)
-tlogpb210_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+tlogpb210_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 tlogpb210_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),13]
 tlogpb210_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),1]
 tlogpb210_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),14]
@@ -1718,7 +1718,7 @@ dev.off()
 # mass depth version of above plots
 # excess pb-210 mass depth
 pdf(file.path(folder_name, "excess_pb210_md.pdf"), width = 8, height = 6)
-epb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+epb210_md_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 epb210_md_plotting_table[,1]=na.omit(concentrations_table[,6])
 epb210_md_plotting_table[,2]=na.omit(concentrations_table[,12])
 epb210_md_plotting_table[,3]=na.omit(concentrations_table[,7])
@@ -1756,7 +1756,7 @@ print(epb210_md_plot)
 dev.off()
 # supported pb-210 mass depth
 pdf(file.path(folder_name, "supported_pb210_md.pdf"), width = 8, height = 6)
-spb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+spb210_md_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 spb210_md_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),4]
 spb210_md_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),12]
 spb210_md_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),5]
@@ -1794,7 +1794,7 @@ print(spb210_md_plot)
 dev.off()
 # total pb-210 mass depth 
 pdf(file.path(folder_name, "total_pb210_md.pdf"), width = 8, height = 6)
-tpb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+tpb210_md_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 tpb210_md_plotting_table[,1]=concentrations_table[seq(2, nrow(concentrations_table), by=2),2]
 tpb210_md_plotting_table[,2]=concentrations_table[seq(2, nrow(concentrations_table), by=2),12]
 tpb210_md_plotting_table[,3]=concentrations_table[seq(2, nrow(concentrations_table), by=2),3]
@@ -1832,7 +1832,7 @@ print(tpb210_md_plot)
 dev.off()
 # Excess log scale pb-210 mass depth
 pdf(file.path(folder_name, "excess_log_pb210_md.pdf"), width = 8, height = 6)
-tlogpb210_md_plotting_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
+tlogpb210_md_plotting_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y","x_uncertainty")))
 tlogpb210_md_plotting_table[,1]=log(na.omit(concentrations_table[,6]))
 tlogpb210_md_plotting_table[,2]=na.omit(concentrations_table[,12])
 tlogpb210_md_plotting_table[,3]=na.omit(concentrations_table[,7]/concentrations_table[,6])
@@ -1963,7 +1963,7 @@ if (zi_correction==TRUE) {
   measured_phi <- as.numeric(porosity_data[[1]])
   measured_phi_sd <- as.numeric(porosity_data[[2]])
   n_measured <- length(measured_phi)
-  zi_correction_table <-as.data.frame(mass_table[, 1:3])
+  zi_correction_table <-as.data.frame(mass_table[1:nrow(concentrations_table), 1:3])
   zi_correction_table$`Porosity` <- NA_real_
   zi_correction_table$`Porosity Uncertainty` <- NA_real_
   zi_correction_table$`Uncompacted Section Thickness (cm)` <-NA_real_
@@ -2525,7 +2525,7 @@ if (res_top$present==TRUE) {
 # end of SAZ auto detection
 CFCS_modeling_complete=FALSE
 SAZ_depth=0
-  surface_table=array(data=NA, dim=c(nrow(mass_table)/2,3), dimnames=list(NULL, c("x","y", "x_uncertainty")))
+  surface_table=array(data=NA, dim=c(nrow(concentrations_table)/2,3), dimnames=list(NULL, c("x","y", "x_uncertainty")))
   surface_table[,1]=na.omit(concentrations_table[,6])
   surface_table[,2]=na.omit(concentrations_table[,1])
   surface_table[,3]=na.omit(concentrations_table[,7])
@@ -4125,13 +4125,13 @@ finish_CFCS=read_bool("CFCS modeling complete. Continue to CF? (True or False) "
 #start of CF section
 if (finish_CFCS==TRUE){
 #create CF table and begin populating it
-CF_table=array(data=NA, dim=c(nrow(mass_table),17), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
+CF_table=array(data=NA, dim=c(nrow(concentrations_table),17), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
 colnames(CF_table) <- gsub("delta", "\u0394", colnames(CF_table))
-CF_table[,1:2]=mass_table[,1:2]
+CF_table[,1:2]=mass_table[1:nrow(concentrations_table),1:2]
 CF_table[1:nrow(concentrations_table),3]=concentrations_table[,10]
 CF_table[1:nrow(concentrations_table),4]=concentrations_table[,11]
-CF_table[,12]=mass_table[,4]
-CF_table[,13]=mass_table[,5]
+CF_table[,12]=mass_table[1:nrow(concentrations_table),4]
+CF_table[,13]=mass_table[1:nrow(concentrations_table),5]
 #inventory below and uncertainty
 for (i in (nrow(CF_table)):1){
   if (i %% 2 ==1){
