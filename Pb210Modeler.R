@@ -56,8 +56,24 @@ check_r_version_current <- function() {
     stop(
       paste0(
         "Your R version is out of date (current: ", current_r,
-        ", latest: ", latest_r, ").\n",
-        "Please update R with install.packages('installr'); installr::updateR(), restart R, and run the script again."
+        ", latest: ", latest_r, ").\n\n",
+        
+        "Please update R using the instructions for your operating system:\n\n",
+        
+        "Windows:\n",
+        "install.packages('installr')\n",
+        "installr::updateR()\n\n",
+        
+        "macOS:\n",
+        "Download and install the latest version from:\n",
+        "https://cran.r-project.org/bin/macosx/\n\n",
+        
+        "Linux:\n",
+        "Update R using your distribution's package manager ",
+        "and the appropriate CRAN repository.\n",
+        "Ubuntu instructions: https://cran.r-project.org/bin/linux/ubuntu/\n\n",
+        
+        "Restart R and run the script again."
       ),
       call. = FALSE
     )
@@ -807,8 +823,8 @@ if (alpha_or_gamma==TRUE){
       }
     }
   
-  concentrations_table=concentrations_table[1:first_background-1,]
-  mass_table=mass_table[1:first_background-1,]
+  concentrations_table=concentrations_table[1:(first_background-1),]
+  mass_table=mass_table[1:(first_background-1),]
   }else{
     independent_background=read_bool("Do you have an independent estimate of supported Pb-210 activity? (True or False) ")
     if (independent_background==TRUE){
@@ -861,12 +877,9 @@ if (alpha_or_gamma==TRUE){
     correction_summary$`Original Total Activity (dpm/g)`=concentrations_table[,2]
     correction_summary$`Original Total Activity Uncertainty (dpm/g)`=concentrations_table[,3]
     correction_summary$`Corrected Total Activity (dpm/g)`= correction_summary$`Original Total Activity (dpm/g)`*(1/correction_summary[,1])
-    correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`=correction_summary$`Corrected Total Activity (dpm/g)` * sqrt((correction_summary[,2]/correction_summary[,1])^2+(correction_summary[,4]/correction_summary[,3])^2)
-    concentrations_table[,2] <-
-      correction_summary$`Corrected Total Activity (dpm/g)`
-    
-    concentrations_table[,3] <-
-      correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`
+    correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`=correction_summary$`Corrected Total Activity (dpm/g)` * sqrt((correction_summary[,"Attenuation Coefficient Uncertainty"]/correction_summary[,"Attenuation Coefficient"])^2+(correction_summary[,"Original Total Activity Uncertainty (dpm/g)"]/correction_summary[,"Original Total Activity (dpm/g)"])^2)
+    concentrations_table[,2] <-correction_summary$`Corrected Total Activity (dpm/g)`
+    concentrations_table[,3] <-correction_summary$`Corrected Total Activity Uncertainty (dpm/g)`
     
   }
   
