@@ -5365,11 +5365,11 @@ dev.off()
 #mass depth comparison plot
 # CF table for mass depth plot
 CF_comp_md_table=as.matrix(array(data=NA, dim=c((nrow(concentrations_table)/2),2)))
-CF_comp_md_table[,1]=na.omit(mass_table[1:nrow(CF_comp_md_table),10])
-CF_comp_md_table[,2]=na.omit(CF_table[1:nrow(CF_comp_md_table),9])
+CF_comp_md_table[,1]=na.omit(mass_table[1:(nrow(CF_comp_md_table)*2),10])
+CF_comp_md_table[,2]=na.omit(CF_table[1:(nrow(CF_comp_md_table)*2),9])
 #CFCS table for mass depth plot
 CFCS_comp_md_table=as.matrix(array(data=NA, dim=c((nrow(concentrations_table)/2),2)))
-CFCS_comp_md_table[,1]=na.omit(mass_table[1:CFCS_comp_md_table,8])
+CFCS_comp_md_table[,1]=na.omit(mass_table[1:(nrow(CFCS_comp_md_table)*2),8])
 CFCS_comp_md_table[,2]=na.omit(CFCS_table[,5])
 #make the plot
 pdf(file.path(folder_name5, "age_comp_md.pdf"), width = 8, height = 6)
@@ -5473,7 +5473,7 @@ print("core-derived atmospheric Pb-210 flux (dpm/(cm^2 yr)")
 atm_flux=as.numeric(CF_table[1,5]*decay_const)
 atm_flux_uncer=atm_flux*sqrt((as.numeric(CF_table[1,6])/as.numeric(CF_table[1,5]))^2+(decay_const_uncer/decay_const)^2)
 print(atm_flux)
-if (exists("est_local_flux")){
+if (est_local_flux==TRUE){
   # Combined uncertainty
   combined_unc <- sqrt(atm_flux_uncer^2 + flux_est_uncer^2)
   
@@ -5506,7 +5506,7 @@ flux_table=array(data=NA, dim=c(1,2), dimnames=list(NULL, c("Core-Derived Atmosp
 flux_table[1,1]=atm_flux
 flux_table[1,2]=atm_flux_uncer
 flux_table=as.data.frame(flux_table)
-if (es_local_flux==TRUE){
+if (est_local_flux==TRUE){
   flux_table$`Estimated Atmospheric Pb-210 Flux (dpm/(cm^2 yr))`=insert_results[1]
   flux_table$`Estimated Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))`=insert_results[2]
   flux_table$`Z score`=Z_scr
