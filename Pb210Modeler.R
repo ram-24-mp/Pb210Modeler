@@ -1996,8 +1996,8 @@ if (zi_correction==TRUE) {
     
     # PATHWAY 1: Independently measured surface porosity
     
-    phi_0=as.numeric(readline(prompt="Enter surface layer porosity"))
-    phi_0_uncer=as.numeric(readline(prompt="Enter surface layer porosity uncertainty"))
+    phi_0=as.numeric(readline(prompt="Enter surface layer porosity "))
+    phi_0_uncer=as.numeric(readline(prompt="Enter surface layer porosity uncertainty "))
     
     phi_0_variance <- phi_0_uncer^2
     Cov_phi0_measured <- numeric(n_measured)
@@ -4125,23 +4125,21 @@ finish_CFCS=read_bool("CFCS modeling complete. Continue to CF? (True or False) "
 #start of CF section
 if (finish_CFCS==TRUE){
 #create CF table and begin populating it
-CF_table=array(data=NA, dim=c(nrow(concentrations_table),17), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
+CF_table=array(data=NA, dim=c((nrow(mass_table)-1),17), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Inventory delta Ai dpm/cm^2","Inventory Uncertainty u(delta Ai) dpm/cm^2","Inventory Below A(i) dpm/cm^2","Inventory Below Uncertainty u(A(i)) dpm/cm^2","Age t(i) yr","Age Uncertainty u(t(i)) yr","Year CE","Mass Accumulation Rate r(i) g/(cm^2 yr)","Mass Accumulation Rate Uncertainty u(r(i)) g/(cm^2 yr)","Dry Bulk Density Section ri g/cm^3","Dry Bulk Density Section Uncertainty u(ri) g/cm^3","Dry Bulk Density Layer r(i) g/cm^3","Dry Bulk Density Layer Uncertainty u(r(i)) g/cm^3","Sediment Accumulation Rate s(i) cm/yr","Sediment Accumulation Rate Uncertainty U(s(i)) cm/yr")))
 colnames(CF_table) <- gsub("delta", "\u0394", colnames(CF_table))
-CF_table[,1:2]=mass_table[1:nrow(concentrations_table),1:2]
+CF_table[,1:2]=mass_table[1:nrow(CF_table),1:2]
 CF_table[1:nrow(concentrations_table),3]=concentrations_table[,10]
 CF_table[1:nrow(concentrations_table),4]=concentrations_table[,11]
-CF_table[,12]=mass_table[1:nrow(concentrations_table),4]
-CF_table[,13]=mass_table[1:nrow(concentrations_table),5]
+CF_table[,12]=mass_table[1:nrow(CF_table),4]
+CF_table[,13]=mass_table[1:nrow(CF_table),5]
 #inventory below and uncertainty
-for (i in (nrow(CF_table)):1){
-  if (i %% 2 ==1){
-    if (i==nrow(CF_table)){
-      CF_table[nrow(CF_table),5]=missing_inventory
-      CF_table[nrow(CF_table),6]=missing_inventory_uncer
-    }else{
-      CF_table[i,5]=CF_table[i+2,5]+CF_table[i+1,3]
-      CF_table[i, 6] = sqrt(sum(CF_table[i + 2, 6]^2, CF_table[i+1, 4]^2))
-    }
+for (i in seq(nrow(CF_table), 1, by = -2)) {
+  if (i == nrow(CF_table)) {
+    CF_table[i, 5] = missing_inventory
+    CF_table[i, 6] = missing_inventory_uncer
+  } else {
+    CF_table[i, 5] = CF_table[i + 2, 5] + CF_table[i + 1, 3]
+    CF_table[i, 6] = sqrt(sum(CF_table[i + 2, 6]^2, CF_table[i + 1, 4]^2))
   }
 }
 #ti, year, MAR
@@ -5274,11 +5272,11 @@ write_xlsx(model_summaries_surf_DBD, path = "CF modeling data/DBD_model_summarie
 if (surface_active_zone_check==FALSE){
 folder_name5 = "CF_CFCS model comparisons"
 dir.create(folder_name5)
-CF_CFCS_table=array(data=NA, dim=c(nrow(mass_table),6), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Mass Depth Section mi gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","CF Age CE","CFCS Age CE")))
-CF_CFCS_table[,1:2]=mass_table[,1:2]
-CF_CFCS_table[,3]=mass_table[,10]
-CF_CFCS_table[,4]=mass_table[,8]
-CF_CFCS_table[,5]=CF_table[,9]
+CF_CFCS_table=array(data=NA, dim=c(nrow(CFCS_table)*2,6), dimnames=list(NULL,c("Top of Interval z(i) cm", "Mid Depth zi cm","Mass Depth Section mi gcm^-2","Cumulative Mass Depth Layer m(i) gcm^-2","CF Age CE","CFCS Age CE")))
+CF_CFCS_table[,1:2]=mass_table[1:(nrow(CFCS_table)*2),1:2]
+CF_CFCS_table[,3]=mass_table[1:(nrow(CFCS_table)*2),10]
+CF_CFCS_table[,4]=mass_table[1:(nrow(CFCS_table)*2),8]
+CF_CFCS_table[,5]=CF_table[1:(nrow(CFCS_table)*2),9]
 # get CFCS years into proper format
 CFCS_format_fix = CFCS_table[, 5]
 if (!is.na(CFCS_format_fix[1])) {
@@ -5367,11 +5365,11 @@ dev.off()
 #mass depth comparison plot
 # CF table for mass depth plot
 CF_comp_md_table=as.matrix(array(data=NA, dim=c((nrow(concentrations_table)/2),2)))
-CF_comp_md_table[,1]=na.omit(mass_table[,10])
-CF_comp_md_table[,2]=na.omit(CF_table[,9])
+CF_comp_md_table[,1]=na.omit(mass_table[1:nrow(CF_comp_md_table),10])
+CF_comp_md_table[,2]=na.omit(CF_table[1:nrow(CF_comp_md_table),9])
 #CFCS table for mass depth plot
 CFCS_comp_md_table=as.matrix(array(data=NA, dim=c((nrow(concentrations_table)/2),2)))
-CFCS_comp_md_table[,1]=na.omit(mass_table[1:(nrow(mass_table)-2),8])
+CFCS_comp_md_table[,1]=na.omit(mass_table[1:CFCS_comp_md_table,8])
 CFCS_comp_md_table[,2]=na.omit(CFCS_table[,5])
 #make the plot
 pdf(file.path(folder_name5, "age_comp_md.pdf"), width = 8, height = 6)
@@ -5475,11 +5473,48 @@ print("core-derived atmospheric Pb-210 flux (dpm/(cm^2 yr)")
 atm_flux=as.numeric(CF_table[1,5]*decay_const)
 atm_flux_uncer=atm_flux*sqrt((as.numeric(CF_table[1,6])/as.numeric(CF_table[1,5]))^2+(decay_const_uncer/decay_const)^2)
 print(atm_flux)
-flux_table=array(data=NA, dim=c(1,4), dimnames=list(NULL, c("Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))","Estimated Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Estimated Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))")))
+if (exists("est_local_flux")){
+  # Combined uncertainty
+  combined_unc <- sqrt(atm_flux_uncer^2 + flux_est_uncer^2)
+  
+  # Normalized difference
+  Z_scr<- abs(atm_flux - flux_est) / combined_unc
+  
+  # Two-tailed p-value
+  p_value <- 2 * pnorm(-Z_scr)
+  
+  # Results
+  print("Z score")
+  print(Z)
+  print("p value")
+  print(p_value)
+  
+  if (p_value < 0.05) {
+    print("Fluxes are statistically different (p < 0.05)")
+    focus_factor=atm_flux/flux_est
+    if (focus_factor<1){
+      print("sediment defocusing detected!")
+    }else{
+      print("sediment focusing detected!")
+    }
+    
+  } else {
+    print("No statistically significant difference detected")
+  }
+}
+flux_table=array(data=NA, dim=c(1,2), dimnames=list(NULL, c("Core-Derived Atmospheric Pb-210 Flux (dpm/(cm^2 yr))", "Core-Derived Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))")))
 flux_table[1,1]=atm_flux
 flux_table[1,2]=atm_flux_uncer
-flux_table[1,3]=insert_results[1]
-flux_table[1,4]=insert_results[2]
+flux_table=as.data.frame(flux_table)
+if (es_local_flux==TRUE){
+  flux_table$`Estimated Atmospheric Pb-210 Flux (dpm/(cm^2 yr))`=insert_results[1]
+  flux_table$`Estimated Atmospheric Pb-210 Flux Uncertainty (dpm/(cm^2 yr))`=insert_results[2]
+  flux_table$`Z score`=Z_scr
+  flux_table$`p value`=p_value
+  if (exists("focus_factor")){
+    flux_table$`Sediment Focusing Factor`=focus_factor
+  }
+}
 flux_table_path <- file.path(folder_name3, "atm_pb210_flux.xlsx")
 write_xlsx(as.data.frame(flux_table), flux_table_path)
 
